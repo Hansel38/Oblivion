@@ -1,7 +1,6 @@
 #include "../include/utils.h"
 #include <TlHelp32.h>
 #include <string>
-#include <Windows.h>
 
 namespace Utils {
     bool IsProcessRunning(const std::wstring& processName) {
@@ -13,23 +12,32 @@ namespace Utils {
         PROCESSENTRY32W pe;
         pe.dwSize = sizeof(PROCESSENTRY32W);
 
+        bool found = false;
         if (Process32FirstW(hSnapshot, &pe)) {
             do {
                 if (_wcsicmp(pe.szExeFile, processName.c_str()) == 0) {
-                    CloseHandle(hSnapshot);
-                    return true;
+                    found = true;
+                    break;
                 }
             } while (Process32NextW(hSnapshot, &pe));
         }
 
         CloseHandle(hSnapshot);
-        return false;
+        return found;
     }
 
-    void ShowCheatDetectedMessage(const std::wstring& cheatType) {
+    void ShowCheatDetectedMessage(const std::wstring& cheatType, const std::wstring& details) {
         // Buat pesan yang lebih informatif
         std::wstring message = L"Oblivion Eye Anti-Cheat mendeteksi aktivitas mencurigakan!\n\n";
-        message += L"Jenis cheat terdeteksi: " + cheatType + L"\n\n";
+        message += L"Jenis cheat terdeteksi: " + cheatType + L"\n";
+
+        if (!details.empty()) {
+            message += L"Detail: " + details + L"\n\n";
+        }
+        else {
+            message += L"\n";
+        }
+
         message += L"Sistem keamanan kami telah menghentikan koneksi Anda.\n";
         message += L"Jika Anda yakin ini adalah kesalahan, hubungi administrator game.";
 
@@ -44,39 +52,17 @@ namespace Utils {
         // Dapatkan handle window game
         HWND hwnd = FindWindowW(L"ROClientClass", nullptr);
 
-        // Tampilkan messagebox tergantung pada jenis cheat yang terdeteksi
-        if (hwnd) {
-            // Kita tidak tahu jenis cheatnya di sini, jadi kita coba deteksi
-            if (AntiDebug::IsDebugged()) {
-                ShowCheatDetectedMessage(L"Debugger/Analisis");
-            }
-            else if (ProcessWatcher::CheckBlacklistedProcesses()) {
-                ShowCheatDetectedMessage(L"Software Cheat (Cheat Engine, dll)");
-            }
-            else if (OverlayScanner::DetectOverlayWindows()) {
-                ShowCheatDetectedMessage(L"Overlay/ESP");
-            }
-            else if (AntiSuspend::IsThreadSuspended()) {
-                ShowCheatDetectedMessage(L"Thread Suspended");
-            }
-            else if (InjectionScanner::DetectInjectedModules()) {
-                ShowCheatDetectedMessage(L"Modul Terinjeksi");
-            }
-            else if (MemoryScanner::ScanMemoryForSignatures()) {
-                ShowCheatDetectedMessage(L"Signature Mencurigakan");
-            }
-            else {
-                ShowCheatDetectedMessage(L"Aktivitas Mencurigakan");
-            }
+        // Tentukan jenis cheat yang terdeteksi untuk pesan yang lebih spesifik
+        std::wstring cheatType;
+        std::wstring details;
 
+        // Karena kita tidak tahu jenis cheatnya di sini, kita coba deteksi
+        if (hwnd) {
             // Kirim WM_CLOSE ke window game
             PostMessageW(hwnd, WM_CLOSE, 0, 0);
         }
         // Jika tidak berhasil, tutup proses
         else {
-            // Tampilkan messagebox umum
-            ShowCheatDetectedMessage(L"Sistem Keamanan Aktif");
-
             HANDLE hProcess = OpenProcess(PROCESS_TERMINATE, FALSE, GetCurrentProcessId());
             if (hProcess) {
                 TerminateProcess(hProcess, 1);

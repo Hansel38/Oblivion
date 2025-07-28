@@ -4,7 +4,7 @@
 
 // Daftar proses yang diblacklist
 const std::vector<std::wstring> BLACKLISTED_PROCESSES = {
-    L"cheatengine.exe",
+    L"cheatengine.exe",          // Tambahkan ini
     L"cheatengine-x86_64.exe",
     L"cheatengine-x86.exe",
     L"cheatengine-i386.exe",

@@ -8,22 +8,23 @@ namespace AntiSuspend {
     // Variabel global untuk monitoring
     std::atomic<bool> monitoringActive(false);
     std::atomic<bool> isSuspended(false);
-    ULONGLONG lastTickCount = 0;
+    LONGLONG lastTickCount = 0;
+    LARGE_INTEGER frequency;
 
     // Threshold untuk mendeteksi suspensi (dalam milidetik)
     const int SUSPENSION_THRESHOLD_MS = 100;
-    const int CHECK_INTERVAL_MS = 50;
 
     // Fungsi untuk thread monitoring
     void MonitoringThread() {
-        // Gunakan GetTickCount64() saja - lebih aman dan tidak menyebabkan konflik
-        lastTickCount = GetTickCount64();
+        // Dapatkan frekuensi counter performa tinggi
+        QueryPerformanceFrequency(&frequency);
 
         while (monitoringActive) {
-            ULONGLONG currentTime = GetTickCount64();
+            LARGE_INTEGER currentTime;
+            QueryPerformanceCounter(&currentTime);
 
             // Hitung selisih waktu dalam milidetik
-            ULONGLONG elapsedMs = currentTime - lastTickCount;
+            LONGLONG elapsedMs = ((currentTime.QuadPart - lastTickCount) * 1000) / frequency.QuadPart;
 
             // Jika waktu yang berlalu jauh lebih besar dari interval pemantauan
             if (lastTickCount != 0 && elapsedMs > SUSPENSION_THRESHOLD_MS) {
@@ -32,10 +33,10 @@ namespace AntiSuspend {
             }
 
             // Update tick terakhir
-            lastTickCount = currentTime;
+            lastTickCount = currentTime.QuadPart;
 
             // Tunggu sebentar sebelum cek berikutnya
-            std::this_thread::sleep_for(std::chrono::milliseconds(CHECK_INTERVAL_MS));
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
         }
     }
 
@@ -44,8 +45,10 @@ namespace AntiSuspend {
         isSuspended = false;
         lastTickCount = 0;
 
-        // Inisialisasi counter
-        lastTickCount = GetTickCount64();
+        // Inisialisasi counter performa
+        LARGE_INTEGER currentTime;
+        QueryPerformanceCounter(&currentTime);
+        lastTickCount = currentTime.QuadPart;
 
         // Mulai thread monitoring
         monitoringActive = true;

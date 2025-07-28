@@ -16,9 +16,8 @@ namespace MemoryScanner {
 
     // Daftar signature cheat engine dan tool terkait
     const SignatureDefinition CHEAT_SIGNATURES[] = {
-        // Cheat Engine signatures - hanya yang sangat spesifik
         {
-            (const BYTE*)"\x55\x8B\xEC\x83\xEC\x28\x53\x56\x57", // Typical function prologue
+            (const BYTE*)"\x55\x8B\xEC\x83\xEC\x28\x53\x56\x57",
             "xxxxxxxxx",
             9,
             "Cheat Engine Code Pattern"
@@ -40,7 +39,6 @@ namespace MemoryScanner {
     // Daftar region memori yang diizinkan (whitelist)
     std::vector<std::pair<BYTE*, SIZE_T>> WHITELISTED_REGIONS;
 
-    // Fungsi untuk menambahkan region ke whitelist
     void AddToWhitelist(BYTE* baseAddress, SIZE_T regionSize) {
         WHITELISTED_REGIONS.push_back(std::make_pair(baseAddress, regionSize));
     }
@@ -55,7 +53,6 @@ namespace MemoryScanner {
     }
 
     bool ScanRegionForSignature(const BYTE* startAddress, SIZE_T regionSize, const BYTE* signature, const char* mask, SIZE_T signatureLength) {
-        // Pastikan kita tidak melebihi batas memori
         if (regionSize < signatureLength || signatureLength == 0) {
             return false;
         }
@@ -77,7 +74,6 @@ namespace MemoryScanner {
 
     bool ScanMemoryForSignatures() {
         try {
-            // Dapatkan informasi memori proses
             SYSTEM_INFO sysInfo;
             GetSystemInfo(&sysInfo);
 
@@ -87,44 +83,35 @@ namespace MemoryScanner {
             MEMORY_BASIC_INFORMATION memInfo;
 
             while (addr < end) {
-                // Pastikan kita tidak crash jika VirtualQuery gagal
                 if (VirtualQuery(addr, &memInfo, sizeof(memInfo)) == 0) {
-                    // Coba lanjutkan ke alamat berikutnya
                     addr += 0x1000;
                     continue;
                 }
 
-                // Hindari crash dengan memastikan region size valid
                 if (memInfo.RegionSize == 0) {
                     addr += 0x1000;
                     continue;
                 }
 
-                // Hanya scan region yang dapat dibaca dan bukan bagian dari whitelist
                 if ((memInfo.State == MEM_COMMIT) &&
                     (memInfo.Protect & (PAGE_READONLY | PAGE_READWRITE | PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE))) {
 
-                    // Lewati region yang di-whitelist
                     if (IsRegionWhitelisted((BYTE*)memInfo.BaseAddress)) {
                         addr += memInfo.RegionSize;
                         continue;
                     }
 
-                    // Cek setiap signature
                     for (const auto& sig : CHEAT_SIGNATURES) {
                         if (ScanRegionForSignature((BYTE*)memInfo.BaseAddress, memInfo.RegionSize, sig.signature, sig.mask, sig.length)) {
-                            return true; // Cheat terdeteksi
+                            return true;
                         }
                     }
                 }
 
-                // Pastikan kita maju ke alamat berikutnya
                 addr += memInfo.RegionSize;
             }
         }
         catch (...) {
-            // Jika terjadi exception, abaikan dan kembalikan false
-            // Jangan sampai memory scanner menyebabkan crash
             return false;
         }
 

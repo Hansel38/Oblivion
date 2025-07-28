@@ -6,9 +6,8 @@
 #include "../include/utils.h"
 
 // Definisi manual untuk STATUS_INFO_LENGTH_MISMATCH
-#ifndef STATUS_INFO_LENGTH_MISMATCH
+// Nilai ini adalah 0xC0000004 (sudah dikonfirmasi di ntstatus.h)
 #define STATUS_INFO_LENGTH_MISMATCH 0xC0000004
-#endif
 
 // Definisi untuk NtQuerySystemInformation
 typedef LONG(NTAPI* NtQuerySystemInformation_t)(

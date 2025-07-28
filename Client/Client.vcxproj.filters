@@ -42,7 +42,7 @@
     <ClInclude Include="include\injection_scanner.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="include\memory_scanner.h">
+    <ClInclude Include="include\logger.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>
@@ -71,8 +71,11 @@
     <ClCompile Include="src\injection_scanner.cpp">
       <Filter>Resource Files</Filter>
     </ClCompile>
-    <ClCompile Include="src\memory_scanner.cpp">
+    <ClCompile Include="src\logger.cpp">
       <Filter>Resource Files</Filter>
     </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="packages.config" />
   </ItemGroup>
 </Project>
