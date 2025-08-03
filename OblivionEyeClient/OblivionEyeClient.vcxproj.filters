@@ -45,6 +45,15 @@
     <ClInclude Include="include\MemoryScanner.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="include\HWIDSystem.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="include\FileIntegrity.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="include\NetworkClient.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="dllmain.cpp">
@@ -75,6 +84,15 @@
       <Filter>Resource Files</Filter>
     </ClCompile>
     <ClCompile Include="src\MemoryScanner.cpp">
+      <Filter>Resource Files</Filter>
+    </ClCompile>
+    <ClCompile Include="src\HWIDSystem.cpp">
+      <Filter>Resource Files</Filter>
+    </ClCompile>
+    <ClCompile Include="src\FileIntegrity.cpp">
+      <Filter>Resource Files</Filter>
+    </ClCompile>
+    <ClCompile Include="src\NetworkClient.cpp">
       <Filter>Resource Files</Filter>
     </ClCompile>
   </ItemGroup>

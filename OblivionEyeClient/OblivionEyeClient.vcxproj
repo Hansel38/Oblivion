@@ -141,9 +141,12 @@
     <ClInclude Include="framework.h" />
     <ClInclude Include="include\AntiDebug.h" />
     <ClInclude Include="include\Blacklist.h" />
+    <ClInclude Include="include\FileIntegrity.h" />
+    <ClInclude Include="include\HWIDSystem.h" />
     <ClInclude Include="include\InjectionScanner.h" />
     <ClInclude Include="include\Logger.h" />
     <ClInclude Include="include\MemoryScanner.h" />
+    <ClInclude Include="include\NetworkClient.h" />
     <ClInclude Include="include\OverlayScanner.h" />
     <ClInclude Include="include\ProcessWatcher.h" />
     <ClInclude Include="include\Utils.h" />
@@ -159,9 +162,12 @@
     </ClCompile>
     <ClCompile Include="src\AntiDebug.cpp" />
     <ClCompile Include="src\Blacklist.cpp" />
+    <ClCompile Include="src\FileIntegrity.cpp" />
+    <ClCompile Include="src\HWIDSystem.cpp" />
     <ClCompile Include="src\InjectionScanner.cpp" />
     <ClCompile Include="src\Logger.cpp" />
     <ClCompile Include="src\MemoryScanner.cpp" />
+    <ClCompile Include="src\NetworkClient.cpp" />
     <ClCompile Include="src\OverlayScanner.cpp" />
     <ClCompile Include="src\ProcessWatcher.cpp" />
     <ClCompile Include="src\Utils.cpp" />

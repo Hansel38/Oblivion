@@ -69,3 +69,5 @@
 .vs/OblivionEye/v17/ipch/AutoPCH/f1cff5fe4b3ddc2f/UTILS.ipch
 .vs/OblivionEye/v17/ipch/b2c4a4928ee63b43.ipch
 .vs/OblivionEye/v17/ipch/c32cf07989816074.ipch
+*.vsidx
+*.ipch
