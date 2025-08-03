@@ -1,9 +1,11 @@
+// OblivionEye.Server/server.cpp
 #include <iostream>
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #include <string>
 #include <thread>
-#include <map>
+#include <unordered_map>
+#include "Whitelist.h" //  Tambahkan ini
 
 #pragma comment(lib, "ws2_32.lib")
 
@@ -18,6 +20,9 @@ int main() {
         return 1;
     }
 
+    // Load whitelist HWID
+    HWIDWhitelist::LoadWhitelist();
+
     // Buat socket
     SOCKET serverSocket = socket(AF_INET, SOCK_STREAM, 0);
     if (serverSocket == INVALID_SOCKET) {
@@ -26,7 +31,7 @@ int main() {
         return 1;
     }
 
-    // Bind ke port 50001 atau bebas rubah portnya
+    // Bind ke port 50001
     sockaddr_in serverAddr;
     serverAddr.sin_family = AF_INET;
     serverAddr.sin_port = htons(50001);
@@ -72,14 +77,29 @@ void HandleClient(SOCKET clientSocket) {
         std::string request(buffer);
         std::cout << "Request: " << request << "\n";
 
-        // Contoh validasi sederhana
-        if (request.find("hwid=VALID_HWID_123") != std::string::npos) {
+        // Ekstrak HWID dari request
+        std::string hwid;
+        size_t pos = request.find("hwid=");
+        if (pos != std::string::npos) {
+            hwid = request.substr(pos + 5);
+            // Bersihkan jika ada & lainnya
+            size_t ampPos = hwid.find('&');
+            if (ampPos != std::string::npos) {
+                hwid = hwid.substr(0, ampPos);
+            }
+            std::cout << "Received HWID: " << hwid << "\n";
+        }
+
+        // Validasi HWID
+        if (!hwid.empty() && HWIDWhitelist::IsHWIDAllowed(hwid)) {
             const char* response = "HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\nALLOW";
             send(clientSocket, response, strlen(response), 0);
+            std::cout << "HWID " << hwid << " ALLOWED\n";
         }
         else {
-            const char* response = "HTTP/1.1 200 OK\r\nContent-Length: 4\r\n\r\nDENY";
+            const char* response = "HTTP/1.1 403 Forbidden\r\nContent-Length: 4\r\n\r\nDENY";
             send(clientSocket, response, strlen(response), 0);
+            std::cout << "HWID " << hwid << " DENIED\n";
         }
     }
 
