@@ -1,4 +1,4 @@
-eature Oblivion Eye HS :
+Feature Oblivion Eye HS :
 1. Process & Thread Watcher
 2. Overlay Scanner
 3. Anti-Debug
