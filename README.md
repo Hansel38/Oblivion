@@ -7,9 +7,10 @@ Feature Oblivion Eye HS :
 6. HWID System
 7. File Integrity Check
 8. Server side Validation
-
-To do :
-1. Anti-Suspend Threads
-2. Hijacked Thread Detector
-3. IAT Hook Scanner
-4. Digital Signature Validator
+9. Anti-Suspend Threads
+10. Hijacked Thread Detector
+11. IAT Hook Scanner
+12. Digital Signature Validator
+|
+todo :
+server Side
