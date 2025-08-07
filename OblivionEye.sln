@@ -1,11 +1,11 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
-VisualStudioVersion = 17.14.36327.8 d17.14
+VisualStudioVersion = 17.14.36401.2 d17.14
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "OblivionEyeClient", "OblivionEyeClient\OblivionEyeClient.vcxproj", "{5E37A022-C790-4C08-A0E2-3542F2E6CE61}"
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "OblivionEye_Client", "OblivionEye_Client\OblivionEye_Client.vcxproj", "{E07B5A19-3DB4-4A2E-9451-0ABE5A8D096D}"
 EndProject
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "OblivionEyeServer", "OblivionEyeServer\OblivionEyeServer.vcxproj", "{68EEB211-F562-4F48-9006-ABAEC38C9BE8}"
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "OblivionEye_Server", "OblivionEye_Server\OblivionEye_Server.vcxproj", "{925E9384-A38F-4414-B725-D420FD4F6BF0}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -15,27 +15,27 @@ Global
 		Release|x86 = Release|x86
 	EndGlobalSection
 	GlobalSection(ProjectConfigurationPlatforms) = postSolution
-		{5E37A022-C790-4C08-A0E2-3542F2E6CE61}.Debug|x64.ActiveCfg = Debug|x64
-		{5E37A022-C790-4C08-A0E2-3542F2E6CE61}.Debug|x64.Build.0 = Debug|x64
-		{5E37A022-C790-4C08-A0E2-3542F2E6CE61}.Debug|x86.ActiveCfg = Debug|Win32
-		{5E37A022-C790-4C08-A0E2-3542F2E6CE61}.Debug|x86.Build.0 = Debug|Win32
-		{5E37A022-C790-4C08-A0E2-3542F2E6CE61}.Release|x64.ActiveCfg = Release|x64
-		{5E37A022-C790-4C08-A0E2-3542F2E6CE61}.Release|x64.Build.0 = Release|x64
-		{5E37A022-C790-4C08-A0E2-3542F2E6CE61}.Release|x86.ActiveCfg = Release|Win32
-		{5E37A022-C790-4C08-A0E2-3542F2E6CE61}.Release|x86.Build.0 = Release|Win32
-		{68EEB211-F562-4F48-9006-ABAEC38C9BE8}.Debug|x64.ActiveCfg = Debug|x64
-		{68EEB211-F562-4F48-9006-ABAEC38C9BE8}.Debug|x64.Build.0 = Debug|x64
-		{68EEB211-F562-4F48-9006-ABAEC38C9BE8}.Debug|x86.ActiveCfg = Debug|Win32
-		{68EEB211-F562-4F48-9006-ABAEC38C9BE8}.Debug|x86.Build.0 = Debug|Win32
-		{68EEB211-F562-4F48-9006-ABAEC38C9BE8}.Release|x64.ActiveCfg = Release|x64
-		{68EEB211-F562-4F48-9006-ABAEC38C9BE8}.Release|x64.Build.0 = Release|x64
-		{68EEB211-F562-4F48-9006-ABAEC38C9BE8}.Release|x86.ActiveCfg = Release|Win32
-		{68EEB211-F562-4F48-9006-ABAEC38C9BE8}.Release|x86.Build.0 = Release|Win32
+		{E07B5A19-3DB4-4A2E-9451-0ABE5A8D096D}.Debug|x64.ActiveCfg = Debug|x64
+		{E07B5A19-3DB4-4A2E-9451-0ABE5A8D096D}.Debug|x64.Build.0 = Debug|x64
+		{E07B5A19-3DB4-4A2E-9451-0ABE5A8D096D}.Debug|x86.ActiveCfg = Debug|Win32
+		{E07B5A19-3DB4-4A2E-9451-0ABE5A8D096D}.Debug|x86.Build.0 = Debug|Win32
+		{E07B5A19-3DB4-4A2E-9451-0ABE5A8D096D}.Release|x64.ActiveCfg = Release|x64
+		{E07B5A19-3DB4-4A2E-9451-0ABE5A8D096D}.Release|x64.Build.0 = Release|x64
+		{E07B5A19-3DB4-4A2E-9451-0ABE5A8D096D}.Release|x86.ActiveCfg = Release|Win32
+		{E07B5A19-3DB4-4A2E-9451-0ABE5A8D096D}.Release|x86.Build.0 = Release|Win32
+		{925E9384-A38F-4414-B725-D420FD4F6BF0}.Debug|x64.ActiveCfg = Debug|x64
+		{925E9384-A38F-4414-B725-D420FD4F6BF0}.Debug|x64.Build.0 = Debug|x64
+		{925E9384-A38F-4414-B725-D420FD4F6BF0}.Debug|x86.ActiveCfg = Debug|Win32
+		{925E9384-A38F-4414-B725-D420FD4F6BF0}.Debug|x86.Build.0 = Debug|Win32
+		{925E9384-A38F-4414-B725-D420FD4F6BF0}.Release|x64.ActiveCfg = Release|x64
+		{925E9384-A38F-4414-B725-D420FD4F6BF0}.Release|x64.Build.0 = Release|x64
+		{925E9384-A38F-4414-B725-D420FD4F6BF0}.Release|x86.ActiveCfg = Release|Win32
+		{925E9384-A38F-4414-B725-D420FD4F6BF0}.Release|x86.Build.0 = Release|Win32
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
-		SolutionGuid = {057ECB5A-0F9E-45B0-8713-E4D0340359E2}
+		SolutionGuid = {2C04570C-CB25-47C6-B11F-955EC6E35A63}
 	EndGlobalSection
 EndGlobal
