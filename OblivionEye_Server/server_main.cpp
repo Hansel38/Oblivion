@@ -1,5 +1,6 @@
 #ifdef _WIN32
 #define _WINSOCK_DEPRECATED_NO_WARNINGS
+#define NOMINMAX  // Prevent Windows.h from defining min/max macros
 #endif
 
 #include <winsock2.h>
@@ -13,7 +14,8 @@
 #include <set>
 #include <algorithm>
 #include <cctype>
-#include "ServerLogger.h" // TAMBAHKAN INI
+#include <iomanip>
+#include "ServerLogger.h"
 
 #pragma comment(lib, "ws2_32.lib")
 
@@ -33,11 +35,13 @@ bool LoadAllowedHWIDsFromFile(const std::string& filename) {
         g_allowedHWIDs.clear();
         int count = 0;
         while (std::getline(file, line)) {
+            // Remove whitespace and newlines
             line.erase(0, line.find_first_not_of(" \t\r\n"));
             line.erase(line.find_last_not_of(" \t\r\n") + 1);
             if (!line.empty() && line[0] != '#') {
                 g_allowedHWIDs.insert(line);
                 count++;
+                ServerLogger::Log(S_LOG_INFO, "Added HWID to whitelist: " + line);
             }
         }
         file.close();
@@ -51,6 +55,15 @@ bool LoadAllowedHWIDsFromFile(const std::string& filename) {
 }
 // ----------------------------------------------
 
+// Function to convert string to hex for debugging
+std::string StringToHex(const std::string& str) {
+    std::stringstream ss;
+    for (unsigned char c : str) {
+        ss << std::hex << std::setfill('0') << std::setw(2) << static_cast<int>(c) << " ";
+    }
+    return ss.str();
+}
+
 // Fungsi untuk menangani koneksi dari satu client
 void HandleClient(SOCKET ClientSocket, int clientNumber) {
     char recvbuf[DEFAULT_BUFLEN];
@@ -60,59 +73,95 @@ void HandleClient(SOCKET ClientSocket, int clientNumber) {
     ServerLogger::Log(S_LOG_CLIENT_CONN, "Client #" + std::to_string(clientNumber) + " connected.");
 
     // --- TERIMA DATA DARI CLIENT ---
-    iResult = recv(ClientSocket, recvbuf, recvbuflen - 1, 0); // Kurangi 1 untuk null-terminator
+    iResult = recv(ClientSocket, recvbuf, recvbuflen - 1, 0);
     if (iResult > 0) {
         recvbuf[iResult] = '\0'; // Null-terminate dengan aman
         std::string receivedData(recvbuf);
 
-        // Log data yang diterima (tanpa karakter kontrol)
+        // Enhanced logging with hex dump
         std::string cleanData;
         for (char c : receivedData) {
             if (c >= 32 && c <= 126) cleanData += c;
             else if (c == '\n') cleanData += "\\n";
             else if (c == '\r') cleanData += "\\r";
-            else cleanData += "\\x" + std::to_string((unsigned char)c);
+            else cleanData += "\\x" + std::to_string(static_cast<unsigned char>(c));
         }
-        ServerLogger::Log(S_LOG_CLIENT_DATA, "Client #" + std::to_string(clientNumber) + " sent: " + cleanData);
 
-        // --- PROSES DATA ---
-        if (receivedData.substr(0, 13) == "VALIDATE_HWID:") {
-            size_t endOfHwid = receivedData.find('\n');
-            if (endOfHwid != std::string::npos) {
-                std::string hwid = receivedData.substr(13, endOfHwid - 13);
-                hwid.erase(0, hwid.find_first_not_of(" \t\r\n"));
-                hwid.erase(hwid.find_last_not_of(" \t\r\n") + 1);
+        ServerLogger::Log(S_LOG_CLIENT_DATA, "Client #" + std::to_string(clientNumber) + " sent (" + std::to_string(iResult) + " bytes): " + cleanData);
+        ServerLogger::Log(S_LOG_CLIENT_DATA, "Hex dump: " + StringToHex(receivedData));
 
-                ServerLogger::Log(S_LOG_VALIDATION, "Client #" + std::to_string(clientNumber) + " requesting validation for HWID: " + hwid);
+        // --- IMPROVED DATA PROCESSING ---
+        // Check if data starts with VALIDATE_HWID:
+        std::string expectedPrefix = "VALIDATE_HWID:";
 
-                // --- VALIDASI HWID ---
-                std::string response;
-                if (g_allowedHWIDs.find(hwid) != g_allowedHWIDs.end()) {
-                    response = "VALID\n";
-                    ServerLogger::Log(S_LOG_VALIDATION, "Client #" + std::to_string(clientNumber) + " HWID " + hwid + " VALID. Sending approval.");
-                }
-                else {
-                    response = "INVALID_HWID\n";
-                    ServerLogger::Log(S_LOG_VALIDATION, "Client #" + std::to_string(clientNumber) + " HWID " + hwid + " INVALID. Sending rejection.");
-                }
+        ServerLogger::Log(S_LOG_CLIENT_DATA, "Checking prefix. Expected: '" + expectedPrefix + "', Received first " + std::to_string(expectedPrefix.length()) + " chars: '" + receivedData.substr(0, expectedPrefix.length()) + "'");
 
-                // --- KIRIM RESPON ---
-                iResult = send(ClientSocket, response.c_str(), (int)response.length(), 0);
-                if (iResult == SOCKET_ERROR) {
-                    ServerLogger::Log(S_LOG_ERROR, "Failed to send response to client #" + std::to_string(clientNumber) + ". Error: " + std::to_string(WSAGetLastError()));
-                }
-                else {
-                    ServerLogger::Log(S_LOG_CLIENT_DATA, "Sent response to client #" + std::to_string(clientNumber) + ": " + response.substr(0, response.length() - 1)); // Hapus \n untuk log
-                }
+        if (receivedData.length() >= expectedPrefix.length() &&
+            receivedData.substr(0, expectedPrefix.length()) == expectedPrefix) {
+
+            // Find the end of HWID (could be \n, \r\n, or end of string)
+            size_t hwidStart = expectedPrefix.length();
+            size_t hwidEnd = receivedData.find_first_of("\r\n", hwidStart);
+            if (hwidEnd == std::string::npos) {
+                hwidEnd = receivedData.length();
+            }
+
+            std::string hwid = receivedData.substr(hwidStart, hwidEnd - hwidStart);
+
+            // Trim whitespace from HWID
+            hwid.erase(0, hwid.find_first_not_of(" \t"));
+            hwid.erase(hwid.find_last_not_of(" \t") + 1);
+
+            ServerLogger::Log(S_LOG_VALIDATION, "Client #" + std::to_string(clientNumber) + " requesting validation for HWID: '" + hwid + "' (length: " + std::to_string(hwid.length()) + ")");
+
+            // --- VALIDASI HWID ---
+            std::string response;
+            bool isValid = false;
+
+            // Check if HWID exists in allowed list
+            if (!hwid.empty() && g_allowedHWIDs.find(hwid) != g_allowedHWIDs.end()) {
+                response = "VALID\n";
+                isValid = true;
+                ServerLogger::Log(S_LOG_VALIDATION, "Client #" + std::to_string(clientNumber) + " HWID '" + hwid + "' is VALID. Sending approval.");
             }
             else {
-                ServerLogger::Log(S_LOG_WARNING, "Client #" + std::to_string(clientNumber) + " sent malformed request.");
-                send(ClientSocket, "ERROR_MALFORMED\n", 17, 0);
+                response = "INVALID_HWID\n";
+                ServerLogger::Log(S_LOG_VALIDATION, "Client #" + std::to_string(clientNumber) + " HWID '" + hwid + "' is INVALID. Sending rejection.");
+
+                // Log all allowed HWIDs for debugging
+                ServerLogger::Log(S_LOG_VALIDATION, "Current allowed HWIDs count: " + std::to_string(g_allowedHWIDs.size()));
+                int debugCount = 0;
+                for (const auto& allowedHwid : g_allowedHWIDs) {
+                    ServerLogger::Log(S_LOG_VALIDATION, "Allowed HWID #" + std::to_string(++debugCount) + ": '" + allowedHwid + "' (length: " + std::to_string(allowedHwid.length()) + ")");
+                    if (debugCount >= 5) { // Limit debug output
+                        ServerLogger::Log(S_LOG_VALIDATION, "... and " + std::to_string(g_allowedHWIDs.size() - debugCount) + " more");
+                        break;
+                    }
+                }
+            }
+
+            // --- KIRIM RESPON ---
+            iResult = send(ClientSocket, response.c_str(), (int)response.length(), 0);
+            if (iResult == SOCKET_ERROR) {
+                ServerLogger::Log(S_LOG_ERROR, "Failed to send response to client #" + std::to_string(clientNumber) + ". Error: " + std::to_string(WSAGetLastError()));
+            }
+            else {
+                ServerLogger::Log(S_LOG_CLIENT_DATA, "Sent response to client #" + std::to_string(clientNumber) + ": " + response.substr(0, response.length() - 1));
             }
         }
         else {
+            // Enhanced error reporting
             ServerLogger::Log(S_LOG_WARNING, "Client #" + std::to_string(clientNumber) + " sent unknown command.");
-            send(ClientSocket, "ERROR_UNKNOWN_CMD\n", 19, 0);
+            ServerLogger::Log(S_LOG_WARNING, "Expected prefix: '" + expectedPrefix + "'");
+            ServerLogger::Log(S_LOG_WARNING, "Received data length: " + std::to_string(receivedData.length()));
+            if (receivedData.length() > 0) {
+                size_t prefixLen = (receivedData.length() < expectedPrefix.length()) ? receivedData.length() : expectedPrefix.length();
+                std::string actualPrefix = receivedData.substr(0, prefixLen);
+                ServerLogger::Log(S_LOG_WARNING, "Actual prefix: '" + actualPrefix + "'");
+            }
+
+            std::string errorResponse = "ERROR_UNKNOWN_CMD\n";
+            send(ClientSocket, errorResponse.c_str(), (int)errorResponse.length(), 0);
         }
     }
     else if (iResult == 0) {
@@ -236,7 +285,7 @@ int main() {
         clientThread.detach();
     }
 
-    // Cleanup (kode ini tidak akan pernah tercapai dalam loop while(true))
+    // Cleanup
     closesocket(ListenSocket);
     WSACleanup();
     ServerLogger::Close();
