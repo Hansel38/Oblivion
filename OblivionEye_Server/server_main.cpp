@@ -1,6 +1,5 @@
 #ifdef _WIN32
 #define _WINSOCK_DEPRECATED_NO_WARNINGS
-#define NOMINMAX  // Prevent Windows.h from defining min/max macros
 #endif
 
 #include <winsock2.h>
@@ -14,8 +13,9 @@
 #include <set>
 #include <algorithm>
 #include <cctype>
-#include <iomanip>
+// --- TAMBAHKAN INCLUDE UNTUK LOGGER ---
 #include "ServerLogger.h"
+// ---------------------------------------
 
 #pragma comment(lib, "ws2_32.lib")
 
@@ -35,13 +35,13 @@ bool LoadAllowedHWIDsFromFile(const std::string& filename) {
         g_allowedHWIDs.clear();
         int count = 0;
         while (std::getline(file, line)) {
-            // Remove whitespace and newlines
+            // Trim whitespace di awal dan akhir
             line.erase(0, line.find_first_not_of(" \t\r\n"));
             line.erase(line.find_last_not_of(" \t\r\n") + 1);
+            // Abaikan baris kosong dan komentar
             if (!line.empty() && line[0] != '#') {
                 g_allowedHWIDs.insert(line);
                 count++;
-                ServerLogger::Log(S_LOG_INFO, "Added HWID to whitelist: " + line);
             }
         }
         file.close();
@@ -55,15 +55,6 @@ bool LoadAllowedHWIDsFromFile(const std::string& filename) {
 }
 // ----------------------------------------------
 
-// Function to convert string to hex for debugging
-std::string StringToHex(const std::string& str) {
-    std::stringstream ss;
-    for (unsigned char c : str) {
-        ss << std::hex << std::setfill('0') << std::setw(2) << static_cast<int>(c) << " ";
-    }
-    return ss.str();
-}
-
 // Fungsi untuk menangani koneksi dari satu client
 void HandleClient(SOCKET ClientSocket, int clientNumber) {
     char recvbuf[DEFAULT_BUFLEN];
@@ -73,102 +64,100 @@ void HandleClient(SOCKET ClientSocket, int clientNumber) {
     ServerLogger::Log(S_LOG_CLIENT_CONN, "Client #" + std::to_string(clientNumber) + " connected.");
 
     // --- TERIMA DATA DARI CLIENT ---
+    // Kurangi 1 dari buffer length untuk ruang null-terminator
     iResult = recv(ClientSocket, recvbuf, recvbuflen - 1, 0);
     if (iResult > 0) {
-        recvbuf[iResult] = '\0'; // Null-terminate dengan aman
+        // Null-terminate buffer dengan aman
+        recvbuf[iResult] = '\0';
         std::string receivedData(recvbuf);
 
-        // Enhanced logging with hex dump
+        // Log data yang diterima (dibersihkan untuk karakter non-printable)
         std::string cleanData;
         for (char c : receivedData) {
-            if (c >= 32 && c <= 126) cleanData += c;
-            else if (c == '\n') cleanData += "\\n";
-            else if (c == '\r') cleanData += "\\r";
-            else cleanData += "\\x" + std::to_string(static_cast<unsigned char>(c));
-        }
-
-        ServerLogger::Log(S_LOG_CLIENT_DATA, "Client #" + std::to_string(clientNumber) + " sent (" + std::to_string(iResult) + " bytes): " + cleanData);
-        ServerLogger::Log(S_LOG_CLIENT_DATA, "Hex dump: " + StringToHex(receivedData));
-
-        // --- IMPROVED DATA PROCESSING ---
-        // Check if data starts with VALIDATE_HWID:
-        std::string expectedPrefix = "VALIDATE_HWID:";
-
-        ServerLogger::Log(S_LOG_CLIENT_DATA, "Checking prefix. Expected: '" + expectedPrefix + "', Received first " + std::to_string(expectedPrefix.length()) + " chars: '" + receivedData.substr(0, expectedPrefix.length()) + "'");
-
-        if (receivedData.length() >= expectedPrefix.length() &&
-            receivedData.substr(0, expectedPrefix.length()) == expectedPrefix) {
-
-            // Find the end of HWID (could be \n, \r\n, or end of string)
-            size_t hwidStart = expectedPrefix.length();
-            size_t hwidEnd = receivedData.find_first_of("\r\n", hwidStart);
-            if (hwidEnd == std::string::npos) {
-                hwidEnd = receivedData.length();
+            if (c >= 32 && c <= 126) {
+                cleanData += c; // Karakter printable ASCII
             }
-
-            std::string hwid = receivedData.substr(hwidStart, hwidEnd - hwidStart);
-
-            // Trim whitespace from HWID
-            hwid.erase(0, hwid.find_first_not_of(" \t"));
-            hwid.erase(hwid.find_last_not_of(" \t") + 1);
-
-            ServerLogger::Log(S_LOG_VALIDATION, "Client #" + std::to_string(clientNumber) + " requesting validation for HWID: '" + hwid + "' (length: " + std::to_string(hwid.length()) + ")");
-
-            // --- VALIDASI HWID ---
-            std::string response;
-            bool isValid = false;
-
-            // Check if HWID exists in allowed list
-            if (!hwid.empty() && g_allowedHWIDs.find(hwid) != g_allowedHWIDs.end()) {
-                response = "VALID\n";
-                isValid = true;
-                ServerLogger::Log(S_LOG_VALIDATION, "Client #" + std::to_string(clientNumber) + " HWID '" + hwid + "' is VALID. Sending approval.");
+            else if (c == '\n') {
+                cleanData += "\\n";
+            }
+            else if (c == '\r') {
+                cleanData += "\\r";
             }
             else {
-                response = "INVALID_HWID\n";
-                ServerLogger::Log(S_LOG_VALIDATION, "Client #" + std::to_string(clientNumber) + " HWID '" + hwid + "' is INVALID. Sending rejection.");
+                // Format karakter kontrol/non-ASCII sebagai hex
+                char hexBuf[5];
+                snprintf(hexBuf, sizeof(hexBuf), "\\x%02X", static_cast<unsigned char>(c));
+                cleanData += std::string(hexBuf);
+            }
+        }
+        ServerLogger::Log(S_LOG_CLIENT_DATA, "Client #" + std::to_string(clientNumber) + " sent: " + cleanData);
 
-                // Log all allowed HWIDs for debugging
-                ServerLogger::Log(S_LOG_VALIDATION, "Current allowed HWIDs count: " + std::to_string(g_allowedHWIDs.size()));
-                int debugCount = 0;
-                for (const auto& allowedHwid : g_allowedHWIDs) {
-                    ServerLogger::Log(S_LOG_VALIDATION, "Allowed HWID #" + std::to_string(++debugCount) + ": '" + allowedHwid + "' (length: " + std::to_string(allowedHwid.length()) + ")");
-                    if (debugCount >= 5) { // Limit debug output
-                        ServerLogger::Log(S_LOG_VALIDATION, "... and " + std::to_string(g_allowedHWIDs.size() - debugCount) + " more");
-                        break;
+        // --- PROSES DATA ---
+        // Kita tidak melakukan trim di awal karena karakter \n penting untuk parsing.
+        // Tapi kita akan membersihkan whitespace dari HWID setelah diekstrak.
+
+        // Cek apakah data dimulai dengan perintah yang dikenali
+        if (receivedData.length() >= 14 && receivedData.substr(0, 13) == "VALIDATE_HWID") {
+            // Cari karakter ':' setelah "VALIDATE_HWID"
+            size_t colonPos = receivedData.find(':', 13);
+            if (colonPos != std::string::npos) {
+                // Cari karakter newline (\n) setelah ':'
+                size_t newlinePos = receivedData.find('\n', colonPos);
+                if (newlinePos != std::string::npos) {
+                    // Ekstrak HWID dari antara ':' dan '\n'
+                    std::string hwid = receivedData.substr(colonPos + 1, newlinePos - colonPos - 1);
+
+                    // Trim whitespace dari HWID
+                    hwid.erase(0, hwid.find_first_not_of(" \t\r\n"));
+                    hwid.erase(hwid.find_last_not_of(" \t\r\n") + 1);
+
+                    ServerLogger::Log(S_LOG_VALIDATION, "Client #" + std::to_string(clientNumber) + " requesting validation for HWID: " + hwid);
+
+                    // --- VALIDASI HWID ---
+                    std::string response;
+                    if (g_allowedHWIDs.find(hwid) != g_allowedHWIDs.end()) {
+                        response = "VALID\n";
+                        ServerLogger::Log(S_LOG_VALIDATION, "Client #" + std::to_string(clientNumber) + " HWID " + hwid + " VALID. Sending approval.");
+                    }
+                    else {
+                        response = "INVALID_HWID\n";
+                        ServerLogger::Log(S_LOG_VALIDATION, "Client #" + std::to_string(clientNumber) + " HWID " + hwid + " INVALID. Sending rejection.");
+                    }
+
+                    // --- KIRIM RESPON ---
+                    iResult = send(ClientSocket, response.c_str(), (int)response.length(), 0);
+                    if (iResult == SOCKET_ERROR) {
+                        ServerLogger::Log(S_LOG_ERROR, "Failed to send response to client #" + std::to_string(clientNumber) + ". Error: " + std::to_string(WSAGetLastError()));
+                    }
+                    else {
+                        ServerLogger::Log(S_LOG_CLIENT_DATA, "Sent response to client #" + std::to_string(clientNumber) + ": " + response.substr(0, response.length() - 1));
                     }
                 }
-            }
-
-            // --- KIRIM RESPON ---
-            iResult = send(ClientSocket, response.c_str(), (int)response.length(), 0);
-            if (iResult == SOCKET_ERROR) {
-                ServerLogger::Log(S_LOG_ERROR, "Failed to send response to client #" + std::to_string(clientNumber) + ". Error: " + std::to_string(WSAGetLastError()));
+                else {
+                    ServerLogger::Log(S_LOG_WARNING, "Client #" + std::to_string(clientNumber) + " sent malformed request (missing newline). Data: '" + receivedData + "'");
+                    send(ClientSocket, "ERROR_MALFORMED\n", 17, 0);
+                }
             }
             else {
-                ServerLogger::Log(S_LOG_CLIENT_DATA, "Sent response to client #" + std::to_string(clientNumber) + ": " + response.substr(0, response.length() - 1));
+                ServerLogger::Log(S_LOG_WARNING, "Client #" + std::to_string(clientNumber) + " sent malformed request (missing colon). Data: '" + receivedData + "'");
+                send(ClientSocket, "ERROR_MALFORMED\n", 17, 0);
             }
         }
         else {
-            // Enhanced error reporting
-            ServerLogger::Log(S_LOG_WARNING, "Client #" + std::to_string(clientNumber) + " sent unknown command.");
-            ServerLogger::Log(S_LOG_WARNING, "Expected prefix: '" + expectedPrefix + "'");
-            ServerLogger::Log(S_LOG_WARNING, "Received data length: " + std::to_string(receivedData.length()));
-            if (receivedData.length() > 0) {
-                size_t prefixLen = (receivedData.length() < expectedPrefix.length()) ? receivedData.length() : expectedPrefix.length();
-                std::string actualPrefix = receivedData.substr(0, prefixLen);
-                ServerLogger::Log(S_LOG_WARNING, "Actual prefix: '" + actualPrefix + "'");
-            }
-
-            std::string errorResponse = "ERROR_UNKNOWN_CMD\n";
-            send(ClientSocket, errorResponse.c_str(), (int)errorResponse.length(), 0);
+            ServerLogger::Log(S_LOG_WARNING, "Client #" + std::to_string(clientNumber) + " sent unknown command or invalid format. Data: '" + receivedData + "'");
+            send(ClientSocket, "ERROR_UNKNOWN_CMD\n", 19, 0);
         }
     }
     else if (iResult == 0) {
         ServerLogger::Log(S_LOG_CLIENT_CONN, "Client #" + std::to_string(clientNumber) + " closed connection gracefully.");
     }
     else {
-        ServerLogger::Log(S_LOG_ERROR, "recv failed for client #" + std::to_string(clientNumber) + ". Error: " + std::to_string(WSAGetLastError()));
+        int errorCode = WSAGetLastError();
+        ServerLogger::Log(S_LOG_ERROR, "recv failed for client #" + std::to_string(clientNumber) + ". Error: " + std::to_string(errorCode));
+        // Jika error adalah WSAECONNRESET, itu berarti client memutus koneksi secara tiba-tiba
+        if (errorCode == WSAECONNRESET) {
+            ServerLogger::Log(S_LOG_CLIENT_CONN, "Client #" + std::to_string(clientNumber) + " connection was forcibly closed by the remote host.");
+        }
     }
 
     // --- TUTUP KONEKSI ---
@@ -226,8 +215,9 @@ int main() {
     // Create a SOCKET for connecting to server
     SOCKET ListenSocket = socket(result->ai_family, result->ai_socktype, result->ai_protocol);
     if (ListenSocket == INVALID_SOCKET) {
-        ServerLogger::Log(S_LOG_ERROR, "Error at socket(): " + std::to_string(WSAGetLastError()));
-        std::cerr << "Error at socket(): " << WSAGetLastError() << std::endl;
+        int errorCode = WSAGetLastError();
+        ServerLogger::Log(S_LOG_ERROR, "Error at socket(): " + std::to_string(errorCode));
+        std::cerr << "Error at socket(): " << errorCode << std::endl;
         freeaddrinfo(result);
         WSACleanup();
         ServerLogger::Close();
@@ -237,8 +227,9 @@ int main() {
     // Setup the TCP listening socket
     iResult = bind(ListenSocket, result->ai_addr, (int)result->ai_addrlen);
     if (iResult == SOCKET_ERROR) {
-        ServerLogger::Log(S_LOG_ERROR, "bind failed with error: " + std::to_string(WSAGetLastError()));
-        std::cerr << "bind failed with error: " << WSAGetLastError() << std::endl;
+        int errorCode = WSAGetLastError();
+        ServerLogger::Log(S_LOG_ERROR, "bind failed with error: " + std::to_string(errorCode));
+        std::cerr << "bind failed with error: " << errorCode << std::endl;
         freeaddrinfo(result);
         closesocket(ListenSocket);
         WSACleanup();
@@ -250,8 +241,9 @@ int main() {
 
     iResult = listen(ListenSocket, SOMAXCONN);
     if (iResult == SOCKET_ERROR) {
-        ServerLogger::Log(S_LOG_ERROR, "listen failed with error: " + std::to_string(WSAGetLastError()));
-        std::cerr << "listen failed with error: " << WSAGetLastError() << std::endl;
+        int errorCode = WSAGetLastError();
+        ServerLogger::Log(S_LOG_ERROR, "listen failed with error: " + std::to_string(errorCode));
+        std::cerr << "listen failed with error: " << errorCode << std::endl;
         closesocket(ListenSocket);
         WSACleanup();
         ServerLogger::Close();
@@ -276,16 +268,19 @@ int main() {
             int err = WSAGetLastError();
             ServerLogger::Log(S_LOG_ERROR, "accept failed: " + std::to_string(err));
             std::cerr << "accept failed: " << err << std::endl;
+            // Lanjutkan menunggu client lain meskipun ada error accept
             continue;
         }
 
         clientCounter++;
         // --- BUAT THREAD BARU UNTUK MENANGANI CLIENT ---
+        // Ini memungkinkan server menangani banyak client secara bersamaan
         std::thread clientThread(HandleClient, ClientSocket, clientCounter);
+        // Detach thread agar bisa berjalan independen
         clientThread.detach();
     }
 
-    // Cleanup
+    // Cleanup (kode ini tidak akan pernah tercapai dalam loop while(true))
     closesocket(ListenSocket);
     WSACleanup();
     ServerLogger::Close();
