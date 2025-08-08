@@ -11,6 +11,4 @@ Feature Oblivion Eye HS :
 10. Hijacked Thread Detector
 11. IAT Hook Scanner
 12. Digital Signature Validator
-|
-todo :
-server Side
+
