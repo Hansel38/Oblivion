@@ -1,79 +1,11 @@
-[2025-08-07 21:33:42] [INFO] === Oblivion Eye Server Started ===
-[2025-08-07 21:33:42] [INFO] Starting Oblivion Eye Validation Server...
-[2025-08-07 21:33:42] [INFO] Successfully loaded 3 allowed HWIDs from allowed_hwids.txt
-[2025-08-07 21:33:42] [INFO] Oblivion Eye Validation Server is running on port 12345
-[2025-08-07 21:33:42] [INFO] Using HWID list from: allowed_hwids.txt
-[2025-08-07 21:33:53] [INFO] === Oblivion Eye Server Started ===
-[2025-08-07 21:33:53] [INFO] Starting Oblivion Eye Validation Server...
-[2025-08-07 21:33:53] [INFO] Successfully loaded 3 allowed HWIDs from allowed_hwids.txt
-[2025-08-07 21:33:53] [INFO] Oblivion Eye Validation Server is running on port 12345
-[2025-08-07 21:33:53] [INFO] Using HWID list from: allowed_hwids.txt
-[2025-08-07 21:33:58] [CLIENT_CONN] Client #1 connected.
-[2025-08-07 21:33:58] [CLIENT_DATA] Client #1 sent: VALIDATE_HWID:507197e7\n
-[2025-08-07 21:33:58] [WARNING] Client #1 sent unknown command.
-[2025-08-07 21:33:58] [CLIENT_CONN] Client #1 connection closed.
-[2025-08-07 21:34:47] [CLIENT_CONN] Client #2 connected.
-[2025-08-07 21:34:47] [CLIENT_DATA] Client #2 sent: VALIDATE_HWID:507197e7\n
-[2025-08-07 21:34:47] [WARNING] Client #2 sent unknown command.
-[2025-08-07 21:34:47] [CLIENT_CONN] Client #2 connection closed.
-[2025-08-07 21:35:18] [INFO] === Oblivion Eye Server Started ===
-[2025-08-07 21:35:18] [INFO] Starting Oblivion Eye Validation Server...
-[2025-08-07 21:35:18] [INFO] Successfully loaded 3 allowed HWIDs from allowed_hwids.txt
-[2025-08-07 21:35:18] [INFO] Oblivion Eye Validation Server is running on port 12345
-[2025-08-07 21:35:18] [INFO] Using HWID list from: allowed_hwids.txt
-[2025-08-07 21:35:22] [CLIENT_CONN] Client #1 connected.
-[2025-08-07 21:35:22] [CLIENT_DATA] Client #1 sent: VALIDATE_HWID:507197e7\n
-[2025-08-07 21:35:22] [WARNING] Client #1 sent unknown command.
-[2025-08-07 21:35:22] [CLIENT_CONN] Client #1 connection closed.
-[2025-08-07 23:39:26] [INFO] === Oblivion Eye Server Started ===
-[2025-08-07 23:39:26] [INFO] Starting Oblivion Eye Validation Server...
-[2025-08-07 23:39:26] [INFO] Successfully loaded 3 allowed HWIDs from allowed_hwids.txt
-[2025-08-07 23:39:26] [INFO] Oblivion Eye Validation Server is running on port 12345
-[2025-08-07 23:39:26] [INFO] Using HWID list from: allowed_hwids.txt
-[2025-08-07 23:39:29] [CLIENT_CONN] Client #1 connected.
-[2025-08-07 23:39:29] [CLIENT_DATA] Client #1 sent: VALIDATE_HWID:507197e7\n
-[2025-08-07 23:39:29] [INFO] Debug Processed Data: 'VALIDATE_HWID:507197e7'
-[2025-08-07 23:39:29] [WARNING] Client #1 sent unknown command or invalid format.
-[2025-08-07 23:39:29] [CLIENT_CONN] Client #1 connection closed.
-[2025-08-07 23:41:24] [INFO] === Oblivion Eye Server Started ===
-[2025-08-07 23:41:24] [INFO] Starting Oblivion Eye Validation Server...
-[2025-08-07 23:41:24] [INFO] Successfully loaded 3 allowed HWIDs from allowed_hwids.txt
-[2025-08-07 23:41:24] [INFO] Oblivion Eye Validation Server is running on port 12345
-[2025-08-07 23:41:24] [INFO] Using HWID list from: allowed_hwids.txt
-[2025-08-07 23:41:29] [CLIENT_CONN] Client #1 connected.
-[2025-08-07 23:41:29] [CLIENT_DATA] Client #1 sent: VALIDATE_HWID:507197e7\n
-[2025-08-07 23:41:29] [INFO] Debug Processed Data: 'VALIDATE_HWID:507197e7'
-[2025-08-07 23:41:29] [WARNING] Client #1 sent unknown command or invalid format.
-[2025-08-07 23:41:29] [CLIENT_CONN] Client #1 connection closed.
-[2025-08-07 23:54:52] [INFO] === Oblivion Eye Server Started ===
-[2025-08-07 23:54:52] [INFO] Starting Oblivion Eye Validation Server...
-[2025-08-07 23:54:52] [INFO] Successfully loaded 3 allowed HWIDs from allowed_hwids.txt
-[2025-08-07 23:54:52] [INFO] Oblivion Eye Validation Server is running on port 12345
-[2025-08-07 23:54:52] [INFO] Using HWID list from: allowed_hwids.txt
-[2025-08-07 23:54:56] [CLIENT_CONN] Client #1 connected.
-[2025-08-07 23:54:56] [CLIENT_DATA] Client #1 sent: VALIDATE_HWID:507197e7\n
-[2025-08-07 23:54:56] [WARNING] Client #1 sent unknown command.
-[2025-08-07 23:54:56] [CLIENT_CONN] Client #1 connection closed.
-[2025-08-08 00:33:24] [INFO] === Oblivion Eye Server Started ===
-[2025-08-08 00:33:24] [INFO] Successfully loaded 3 allowed HWIDs from allowed_hwids.txt
-[2025-08-08 00:33:24] [INFO] Oblivion Eye Validation Server running on port 12345
-[2025-08-08 00:33:30] [CLIENT_CONN] Client #1 connected.
-[2025-08-08 00:33:30] [CLIENT_DATA] Client #1 sent: VALIDATE_HWID:507197e7\n
-[2025-08-08 00:33:30] [WARNING] Client #1 sent unknown command.
-[2025-08-08 00:33:30] [CLIENT_CONN] Client #1 connection closed.
-[2025-08-08 00:42:33] [INFO] === Oblivion Eye Server Started ===
-[2025-08-08 00:42:33] [INFO] Starting Oblivion Eye Validation Server...
-[2025-08-08 00:42:33] [INFO] Added HWID to whitelist: 507197e7
-[2025-08-08 00:42:33] [INFO] Added HWID to whitelist: abcdef12
-[2025-08-08 00:42:33] [INFO] Added HWID to whitelist: 34567890
-[2025-08-08 00:42:33] [INFO] Successfully loaded 3 allowed HWIDs from allowed_hwids.txt
-[2025-08-08 00:42:33] [INFO] Oblivion Eye Validation Server is running on port 12345
-[2025-08-08 00:42:33] [INFO] Using HWID list from: allowed_hwids.txt
-[2025-08-08 00:42:38] [CLIENT_CONN] Client #1 connected.
-[2025-08-08 00:42:38] [CLIENT_DATA] Client #1 sent (23 bytes): VALIDATE_HWID:507197e7\n
-[2025-08-08 00:42:38] [CLIENT_DATA] Hex dump: 56 41 4c 49 44 41 54 45 5f 48 57 49 44 3a 35 30 37 31 39 37 65 37 0a 
-[2025-08-08 00:42:38] [CLIENT_DATA] Checking prefix. Expected: 'VALIDATE_HWID:', Received first 14 chars: 'VALIDATE_HWID:'
-[2025-08-08 00:42:38] [VALIDATION] Client #1 requesting validation for HWID: '507197e7' (length: 8)
-[2025-08-08 00:42:38] [VALIDATION] Client #1 HWID '507197e7' is VALID. Sending approval.
-[2025-08-08 00:42:38] [CLIENT_DATA] Sent response to client #1: VALID
-[2025-08-08 00:42:38] [CLIENT_CONN] Client #1 connection closed.
+[2025-08-08 13:54:29.186] [INFO] Client connected from 127.0.0.1:61558
+[2025-08-08 13:54:32.674] [INFO] Client disconnected from 127.0.0.1:61558
+[2025-08-08 13:58:14.179] [INFO] Loaded 4 allowed HWIDs
+[2025-08-08 13:58:14.181] [INFO] DEBUG: Encryption initialized with key length: 23
+[2025-08-08 13:58:14.182] [INFO] Initializing OblivionEye Server...
+[2025-08-08 13:58:14.186] [INFO] OblivionEye Server started on port 8900
+[2025-08-08 13:58:14.187] [INFO] Allowed HWIDs loaded: 4
+[2025-08-08 13:58:14.187] [INFO] Encryption: ENABLED
+[2025-08-08 13:58:14.190] [INFO] Heartbeat monitoring started
+[2025-08-08 13:58:14.190] [INFO] Server main loop started
+[2025-08-08 13:58:17.969] [INFO] Client connected from 127.0.0.1:61608

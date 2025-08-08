@@ -31,7 +31,7 @@ bool PerformServerValidation(const std::string& hwid) {
     // Alamat server
     sockaddr_in serverAddr;
     serverAddr.sin_family = AF_INET;
-    serverAddr.sin_port = htons(12345); // Port server (bisa dibuat konfigurable)
+    serverAddr.sin_port = htons(8900); // Port server (bisa dibuat konfigurable)
     // Alamat IP server (bisa dibuat konfigurable)
     // Untuk produksi, jangan hardcode. Gunakan enkripsi atau unduh dari sumber aman.
     inet_pton(AF_INET, "127.0.0.1", &serverAddr.sin_addr);

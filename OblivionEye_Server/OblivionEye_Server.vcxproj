@@ -126,9 +126,14 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="server_main.cpp" />
+    <ClCompile Include="src\EncryptionHandler.cpp" />
+    <ClCompile Include="src\HeartbeatManager.cpp" />
     <ClCompile Include="src\ServerLogger.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="include\ClientSession.h" />
+    <ClInclude Include="include\EncryptionHandler.h" />
+    <ClInclude Include="include\HeartbeatManager.h" />
     <ClInclude Include="include\ServerLogger.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
