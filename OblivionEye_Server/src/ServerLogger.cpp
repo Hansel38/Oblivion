@@ -7,24 +7,33 @@
 #include <filesystem>
 #include <algorithm>
 
-// Disable deprecation warnings for this file
-#ifdef _MSC_VER
-#pragma warning(push)
-#pragma warning(disable: 4996)
-#endif
+LoggerConfig::LoggerConfig() {
+    logFilePath = "logs/server.log";
+    minLogLevel = LOG_INFO;
+    maxFileSizeMB = 10;
+    maxBackupFiles = 5;
+    enableConsoleOutput = true;
+}
 
-ServerLogger::ServerLogger()
-    : logFilePath("logs/server.log")
-    , currentLogLevel(INFO)
-    , maxFileSize(10 * 1024 * 1024) // 10 MB
-    , maxFiles(5)
-    , enableConsole(true) {
+ServerLogger::ServerLogger() {
+    logFilePath = "logs/server.log";
+    currentLogLevel = LOG_INFO;
+    maxFileSize = 10 * 1024 * 1024;
+    maxFiles = 5;
+    enableConsole = true;
 
     createLogDirectory();
 }
 
 ServerLogger::~ServerLogger() {
-    // Logger destructor
+}
+
+std::string ServerLogger::getLogFilePath() const {
+    return logFilePath;
+}
+
+LogLevel ServerLogger::getCurrentLogLevel() const {
+    return currentLogLevel;
 }
 
 void ServerLogger::configure(const LoggerConfig& config) {
@@ -45,7 +54,6 @@ std::string ServerLogger::getCurrentTimestamp() const {
     auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
         now.time_since_epoch()) % 1000;
 
-    // Safe localtime usage
     std::tm local_tm;
 #ifdef _WIN32
     localtime_s(&local_tm, &time_t);
@@ -61,12 +69,12 @@ std::string ServerLogger::getCurrentTimestamp() const {
 
 std::string ServerLogger::levelToString(LogLevel level) const {
     switch (level) {
-    case DEBUG:    return "DEBUG";
-    case INFO:     return "INFO";
-    case WARNING:  return "WARN";
-    case ERROR:    return "ERROR";
-    case SECURITY: return "SECURITY";
-    default:       return "UNKNOWN";
+    case LOG_DEBUG:    return "DEBUG";
+    case LOG_INFO:     return "INFO";
+    case LOG_WARNING:  return "WARN";
+    case LOG_ERROR:    return "ERROR";
+    case LOG_SECURITY: return "SECURITY";
+    default:           return "UNKNOWN";
     }
 }
 
@@ -76,7 +84,6 @@ void ServerLogger::createLogDirectory() const {
         std::filesystem::create_directories(logPath.parent_path());
     }
     catch (const std::exception& e) {
-        // Jika gagal membuat direktori, tetap lanjut
         std::cerr << "Warning: Could not create log directory: " << e.what() << std::endl;
     }
 }
@@ -91,8 +98,6 @@ bool ServerLogger::shouldRotate() const {
 }
 
 void ServerLogger::rotateLogs() {
-    // Tutup file yang sedang aktif
-    // Rename file log saat ini
     for (int i = maxFiles - 1; i > 0; i--) {
         std::string oldName = logFilePath + "." + std::to_string(i);
         std::string newName = logFilePath + "." + std::to_string(i + 1);
@@ -102,7 +107,6 @@ void ServerLogger::rotateLogs() {
         }
     }
 
-    // Rename file log utama
     if (std::filesystem::exists(logFilePath)) {
         std::string newName = logFilePath + ".1";
         std::filesystem::rename(logFilePath, newName);
@@ -116,7 +120,6 @@ void ServerLogger::log(LogLevel level, const std::string& message) {
 
     std::lock_guard<std::mutex> lock(log_mutex);
 
-    // Cek apakah perlu rotasi
     if (shouldRotate()) {
         rotateLogs();
     }
@@ -126,18 +129,16 @@ void ServerLogger::log(LogLevel level, const std::string& message) {
 
     std::string logMessage = "[" + timestamp + "] [" + levelStr + "] " + message;
 
-    // Tulis ke file
     std::ofstream logFile(logFilePath, std::ios::app);
     if (logFile.is_open()) {
         logFile << logMessage << std::endl;
         logFile.close();
     }
 
-    // Output ke console jika diaktifkan
     if (enableConsole) {
         switch (level) {
-        case ERROR:
-        case SECURITY:
+        case LOG_ERROR:
+        case LOG_SECURITY:
             std::cerr << logMessage << std::endl;
             break;
         default:
@@ -147,34 +148,31 @@ void ServerLogger::log(LogLevel level, const std::string& message) {
     }
 }
 
-void ServerLogger::logWithClientInfo(LogLevel level, const std::string& clientInfo,
-    const std::string& message) {
-    std::string formattedMessage = "[Client: " + clientInfo + "] " + message;
+void ServerLogger::logWithClientInfo(LogLevel level, const std::string& clientIP, const std::string& message) {
+    std::string formattedMessage = "[Client: " + clientIP + "] " + message;
     log(level, formattedMessage);
 }
 
-// Convenience methods
 void ServerLogger::logDebug(const std::string& message) {
-    log(DEBUG, message);
+    log(LOG_DEBUG, message);
 }
 
 void ServerLogger::logInfo(const std::string& message) {
-    log(INFO, message);
+    log(LOG_INFO, message);
 }
 
 void ServerLogger::logWarning(const std::string& message) {
-    log(WARNING, message);
+    log(LOG_WARNING, message);
 }
 
 void ServerLogger::logError(const std::string& message) {
-    log(ERROR, message);
+    log(LOG_ERROR, message);
 }
 
 void ServerLogger::logSecurity(const std::string& message) {
-    log(SECURITY, message);
+    log(LOG_SECURITY, message);
 }
 
-// Client-specific logging methods
 void ServerLogger::logClientConnection(const std::string& clientIP, int clientPort) {
     std::string message = "Client connected from " + clientIP + ":" + std::to_string(clientPort);
     logInfo(message);
@@ -188,16 +186,11 @@ void ServerLogger::logClientDisconnection(const std::string& clientIP, int clien
 void ServerLogger::logClientHWIDCheck(const std::string& clientIP, const std::string& hwid, bool allowed) {
     std::string status = allowed ? "ALLOWED" : "DENIED";
     std::string message = "HWID check for " + hwid + " from " + clientIP + ": " + status;
-    LogLevel level = allowed ? INFO : SECURITY;
+    LogLevel level = allowed ? LOG_INFO : LOG_SECURITY;
     log(level, message);
 }
 
-void ServerLogger::logClientSecurityAlert(const std::string& clientIP, const std::string& alertType,
-    const std::string& details) {
+void ServerLogger::logClientSecurityAlert(const std::string& clientIP, const std::string& alertType, const std::string& details) {
     std::string message = "SECURITY ALERT [" + alertType + "] from " + clientIP + ": " + details;
     logSecurity(message);
 }
-
-#ifdef _MSC_VER
-#pragma warning(pop)
-#endif

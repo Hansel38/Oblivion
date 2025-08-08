@@ -3,22 +3,24 @@
 
 #include <string>
 #include <mutex>
-#include <fstream>
 
-enum LogLevel {
-    DEBUG = 0,
-    INFO = 1,
-    WARNING = 2,
-    ERROR = 3,
-    SECURITY = 4
-};
+// Use typedef to avoid Windows macro conflicts
+typedef enum {
+    LOG_DEBUG = 0,
+    LOG_INFO = 1,
+    LOG_WARNING = 2,
+    LOG_ERROR = 3,
+    LOG_SECURITY = 4
+} LogLevel;
 
 struct LoggerConfig {
-    std::string logFilePath = "logs/server.log";
-    LogLevel minLogLevel = INFO;
-    size_t maxFileSizeMB = 10;
-    int maxBackupFiles = 5;
-    bool enableConsoleOutput = true;
+    std::string logFilePath;
+    LogLevel minLogLevel;
+    size_t maxFileSizeMB;
+    int maxBackupFiles;
+    bool enableConsoleOutput;
+
+    LoggerConfig();
 };
 
 class ServerLogger {
@@ -30,7 +32,6 @@ private:
     int maxFiles;
     bool enableConsole;
 
-    // Helper methods
     std::string getCurrentTimestamp() const;
     std::string levelToString(LogLevel level) const;
     bool shouldRotate() const;
@@ -41,31 +42,23 @@ public:
     ServerLogger();
     ~ServerLogger();
 
-    // Configuration
     void configure(const LoggerConfig& config);
-
-    // Main logging methods
     void log(LogLevel level, const std::string& message);
-    void logWithClientInfo(LogLevel level, const std::string& clientInfo,
-        const std::string& message);
+    void logWithClientInfo(LogLevel level, const std::string& clientIP, const std::string& message);
 
-    // Convenience methods
     void logDebug(const std::string& message);
     void logInfo(const std::string& message);
     void logWarning(const std::string& message);
     void logError(const std::string& message);
     void logSecurity(const std::string& message);
 
-    // Client-specific logging
     void logClientConnection(const std::string& clientIP, int clientPort);
     void logClientDisconnection(const std::string& clientIP, int clientPort);
     void logClientHWIDCheck(const std::string& clientIP, const std::string& hwid, bool allowed);
-    void logClientSecurityAlert(const std::string& clientIP, const std::string& alertType,
-        const std::string& details);
+    void logClientSecurityAlert(const std::string& clientIP, const std::string& alertType, const std::string& details);
 
-    // Utility methods
-    std::string getLogFilePath() const { return logFilePath; }
-    LogLevel getCurrentLogLevel() const { return currentLogLevel; }
+    std::string getLogFilePath() const;
+    LogLevel getCurrentLogLevel() const;
 };
 
 #endif // SERVER_LOGGER_H
