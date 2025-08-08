@@ -1,288 +1,457 @@
-#ifdef _WIN32
+#include "ServerLogger.h"
+#include <iostream>
+#include <string>
+#include <thread>
+#include <vector>
+#include <fstream>
+#include <algorithm>
+#include <atomic>
+#include <csignal>
+#include <chrono>
+#include <cstring>
+
+// Disable deprecation warnings
+#ifdef _MSC_VER
 #define _WINSOCK_DEPRECATED_NO_WARNINGS
 #endif
 
+#ifdef _WIN32
 #include <winsock2.h>
 #include <ws2tcpip.h>
-#include <iostream>
-#include <thread>
-#include <vector>
-#include <string>
-#include <sstream>
-#include <fstream>
-#include <set>
-#include <algorithm>
-#include <cctype>
-// --- TAMBAHKAN INCLUDE UNTUK LOGGER ---
-#include "ServerLogger.h"
-// ---------------------------------------
-
 #pragma comment(lib, "ws2_32.lib")
+using Socket = SOCKET;
+const Socket INVALID_SOCKET_VAL = INVALID_SOCKET;
+#else
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <unistd.h>
+#include <fcntl.h>
+using Socket = int;
+const Socket INVALID_SOCKET_VAL = -1;
+#define closesocket close
+#endif
 
-#define DEFAULT_PORT "12345"
-#define DEFAULT_BUFLEN 512
-#define HWID_LIST_FILE "allowed_hwids.txt"
+class OblivionEyeServer {
+private:
+    ServerLogger logger;
+    Socket serverSocket;
+    std::atomic<bool> serverRunning;
+    int serverPort;
+    std::vector<std::string> allowedHWIDs;
+    std::mutex clientMutex;
+    std::vector<std::string> connectedClients;
 
-// --- SIMPAN DAFTAR HWID YANG DIIZINKAN ---
-static std::set<std::string> g_allowedHWIDs;
-// ------------------------------------------
+public:
+    OblivionEyeServer(int port = 8900)  // Default port 8900
+        : serverSocket(INVALID_SOCKET_VAL)
+        , serverRunning(false)
+        , serverPort(port) {
 
-// --- FUNGSI UNTUK MEMUAT DAFTAR HWID DARI FILE ---
-bool LoadAllowedHWIDsFromFile(const std::string& filename) {
-    std::ifstream file(filename);
-    std::string line;
-    if (file.is_open()) {
-        g_allowedHWIDs.clear();
-        int count = 0;
-        while (std::getline(file, line)) {
-            // Trim whitespace di awal dan akhir
-            line.erase(0, line.find_first_not_of(" \t\r\n"));
-            line.erase(line.find_last_not_of(" \t\r\n") + 1);
-            // Abaikan baris kosong dan komentar
-            if (!line.empty() && line[0] != '#') {
-                g_allowedHWIDs.insert(line);
-                count++;
-            }
+        // Konfigurasi logger
+        LoggerConfig config;
+        config.logFilePath = "logs/server.log";
+        config.minLogLevel = INFO;
+        config.maxFileSizeMB = 10;
+        config.maxBackupFiles = 5;
+        config.enableConsoleOutput = true;
+
+        logger.configure(config);
+
+        // Load allowed HWIDs
+        loadAllowedHWIDs();
+    }
+
+    ~OblivionEyeServer() {
+        stop();
+    }
+
+    bool initialize() {
+#ifdef _WIN32
+        WSADATA wsaData;
+        if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0) {
+            logger.logError("Failed to initialize Winsock");
+            return false;
         }
-        file.close();
-        ServerLogger::Log(S_LOG_INFO, "Successfully loaded " + std::to_string(count) + " allowed HWIDs from " + filename);
+#endif
         return true;
     }
-    else {
-        ServerLogger::Log(S_LOG_ERROR, "Could not open " + filename + ". Please make sure the file exists.");
-        return false;
+
+    bool start() {
+        logger.logInfo("Initializing OblivionEye Server...");
+
+        if (!initialize()) {
+            return false;
+        }
+
+        serverSocket = socket(AF_INET, SOCK_STREAM, 0);
+        if (serverSocket == INVALID_SOCKET_VAL) {
+            logger.logError("Failed to create server socket");
+            return false;
+        }
+
+        // Allow socket reuse
+        int opt = 1;
+#ifdef _WIN32
+        setsockopt(serverSocket, SOL_SOCKET, SO_REUSEADDR,
+            (const char*)&opt, sizeof(opt));
+#else
+        setsockopt(serverSocket, SOL_SOCKET, SO_REUSEADDR,
+            &opt, sizeof(opt));
+#endif
+
+        sockaddr_in serverAddr;
+        serverAddr.sin_family = AF_INET;
+        serverAddr.sin_addr.s_addr = INADDR_ANY;
+        serverAddr.sin_port = htons(serverPort);
+
+        if (bind(serverSocket, (struct sockaddr*)&serverAddr, sizeof(serverAddr)) == -1) {
+            logger.logError("Failed to bind socket to port " + std::to_string(serverPort));
+            return false;
+        }
+
+        if (listen(serverSocket, 10) == -1) {
+            logger.logError("Failed to listen on socket");
+            return false;
+        }
+
+        serverRunning = true;
+        logger.logInfo("OblivionEye Server started on port " + std::to_string(serverPort));
+        logger.logInfo("Allowed HWIDs loaded: " + std::to_string(allowedHWIDs.size()));
+
+        // Start main server loop in separate thread
+        std::thread serverThread(&OblivionEyeServer::serverLoop, this);
+        serverThread.detach();
+
+        return true;
     }
-}
-// ----------------------------------------------
 
-// Fungsi untuk menangani koneksi dari satu client
-void HandleClient(SOCKET ClientSocket, int clientNumber) {
-    char recvbuf[DEFAULT_BUFLEN];
-    int iResult;
-    int recvbuflen = DEFAULT_BUFLEN;
+    void serverLoop() {
+        logger.logInfo("Server main loop started");
 
-    ServerLogger::Log(S_LOG_CLIENT_CONN, "Client #" + std::to_string(clientNumber) + " connected.");
+        while (serverRunning) {
+            sockaddr_in clientAddr;
+            socklen_t clientAddrLen = sizeof(clientAddr);
 
-    // --- TERIMA DATA DARI CLIENT ---
-    // Kurangi 1 dari buffer length untuk ruang null-terminator
-    iResult = recv(ClientSocket, recvbuf, recvbuflen - 1, 0);
-    if (iResult > 0) {
-        // Null-terminate buffer dengan aman
-        recvbuf[iResult] = '\0';
-        std::string receivedData(recvbuf);
+            Socket clientSocket = accept(serverSocket,
+                (struct sockaddr*)&clientAddr,
+                &clientAddrLen);
 
-        // Log data yang diterima (dibersihkan untuk karakter non-printable)
-        std::string cleanData;
-        for (char c : receivedData) {
-            if (c >= 32 && c <= 126) {
-                cleanData += c; // Karakter printable ASCII
+            if (clientSocket != INVALID_SOCKET_VAL) {
+                // Safe way to get client IP
+                char clientIP[INET_ADDRSTRLEN];
+#ifdef _WIN32
+                inet_ntop(AF_INET, &(clientAddr.sin_addr), clientIP, INET_ADDRSTRLEN);
+#else
+                inet_ntop(AF_INET, &(clientAddr.sin_addr), clientIP, INET_ADDRSTRLEN);
+#endif
+                int clientPort = ntohs(clientAddr.sin_port);
+
+                logger.logClientConnection(std::string(clientIP), clientPort);
+
+                // Handle client in separate thread
+                std::thread clientThread(&OblivionEyeServer::handleClient,
+                    this, clientSocket, std::string(clientIP), clientPort);
+                clientThread.detach();
             }
-            else if (c == '\n') {
-                cleanData += "\\n";
-            }
-            else if (c == '\r') {
-                cleanData += "\\r";
-            }
-            else {
-                // Format karakter kontrol/non-ASCII sebagai hex
-                char hexBuf[5];
-                snprintf(hexBuf, sizeof(hexBuf), "\\x%02X", static_cast<unsigned char>(c));
-                cleanData += std::string(hexBuf);
+            else if (serverRunning) {
+                logger.logWarning("Failed to accept client connection");
             }
         }
-        ServerLogger::Log(S_LOG_CLIENT_DATA, "Client #" + std::to_string(clientNumber) + " sent: " + cleanData);
+    }
 
-        // --- PROSES DATA ---
-        // Kita tidak melakukan trim di awal karena karakter \n penting untuk parsing.
-        // Tapi kita akan membersihkan whitespace dari HWID setelah diekstrak.
+    void handleClient(Socket clientSocket, const std::string& clientIP, int clientPort) {
+        // Add client to connected clients list
+        {
+            std::lock_guard<std::mutex> lock(clientMutex);
+            connectedClients.push_back(clientIP + ":" + std::to_string(clientPort));
+        }
 
-        // Cek apakah data dimulai dengan perintah yang dikenali
-        if (receivedData.length() >= 14 && receivedData.substr(0, 13) == "VALIDATE_HWID") {
-            // Cari karakter ':' setelah "VALIDATE_HWID"
-            size_t colonPos = receivedData.find(':', 13);
-            if (colonPos != std::string::npos) {
-                // Cari karakter newline (\n) setelah ':'
-                size_t newlinePos = receivedData.find('\n', colonPos);
-                if (newlinePos != std::string::npos) {
-                    // Ekstrak HWID dari antara ':' dan '\n'
-                    std::string hwid = receivedData.substr(colonPos + 1, newlinePos - colonPos - 1);
+        char buffer[4096];
+        int bytesReceived;
 
-                    // Trim whitespace dari HWID
-                    hwid.erase(0, hwid.find_first_not_of(" \t\r\n"));
-                    hwid.erase(hwid.find_last_not_of(" \t\r\n") + 1);
+        try {
+            while (serverRunning) {
+                bytesReceived = recv(clientSocket, buffer, sizeof(buffer) - 1, 0);
 
-                    ServerLogger::Log(S_LOG_VALIDATION, "Client #" + std::to_string(clientNumber) + " requesting validation for HWID: " + hwid);
+                if (bytesReceived > 0) {
+                    buffer[bytesReceived] = '\0';
+                    std::string message(buffer);
 
-                    // --- VALIDASI HWID ---
-                    std::string response;
-                    if (g_allowedHWIDs.find(hwid) != g_allowedHWIDs.end()) {
-                        response = "VALID\n";
-                        ServerLogger::Log(S_LOG_VALIDATION, "Client #" + std::to_string(clientNumber) + " HWID " + hwid + " VALID. Sending approval.");
-                    }
-                    else {
-                        response = "INVALID_HWID\n";
-                        ServerLogger::Log(S_LOG_VALIDATION, "Client #" + std::to_string(clientNumber) + " HWID " + hwid + " INVALID. Sending rejection.");
-                    }
+                    // Remove trailing newline/carriage return
+                    message.erase(std::remove(message.begin(), message.end(), '\n'), message.end());
+                    message.erase(std::remove(message.begin(), message.end(), '\r'), message.end());
 
-                    // --- KIRIM RESPON ---
-                    iResult = send(ClientSocket, response.c_str(), (int)response.length(), 0);
-                    if (iResult == SOCKET_ERROR) {
-                        ServerLogger::Log(S_LOG_ERROR, "Failed to send response to client #" + std::to_string(clientNumber) + ". Error: " + std::to_string(WSAGetLastError()));
-                    }
-                    else {
-                        ServerLogger::Log(S_LOG_CLIENT_DATA, "Sent response to client #" + std::to_string(clientNumber) + ": " + response.substr(0, response.length() - 1));
-                    }
+                    processClientMessage(clientSocket, clientIP, message);
+                }
+                else if (bytesReceived == 0) {
+                    // Client disconnected
+                    logger.logClientDisconnection(clientIP, clientPort);
+                    break;
                 }
                 else {
-                    ServerLogger::Log(S_LOG_WARNING, "Client #" + std::to_string(clientNumber) + " sent malformed request (missing newline). Data: '" + receivedData + "'");
-                    send(ClientSocket, "ERROR_MALFORMED\n", 17, 0);
+                    // Error occurred
+                    logger.logWarning("Error receiving data from client " + clientIP);
+                    break;
                 }
             }
-            else {
-                ServerLogger::Log(S_LOG_WARNING, "Client #" + std::to_string(clientNumber) + " sent malformed request (missing colon). Data: '" + receivedData + "'");
-                send(ClientSocket, "ERROR_MALFORMED\n", 17, 0);
+        }
+        catch (const std::exception& e) {
+            logger.logError("Exception in client handler: " + std::string(e.what()));
+        }
+
+        // Remove client from connected clients list
+        {
+            std::lock_guard<std::mutex> lock(clientMutex);
+            auto it = std::find(connectedClients.begin(), connectedClients.end(),
+                clientIP + ":" + std::to_string(clientPort));
+            if (it != connectedClients.end()) {
+                connectedClients.erase(it);
+            }
+        }
+
+        closesocket(clientSocket);
+    }
+
+    void processClientMessage(Socket clientSocket, const std::string& clientIP,
+        const std::string& message) {
+        logger.logDebug("Received message from " + clientIP + ": " + message);
+
+        // Parse message by splitting on colon
+        size_t colonPos = message.find(':');
+        std::string command, data;
+
+        if (colonPos != std::string::npos) {
+            command = message.substr(0, colonPos);
+            data = message.substr(colonPos + 1);
+        }
+        else {
+            command = message;
+            data = "";
+        }
+
+        // Handle different commands
+        if (command == "HWID_CHECK" || command == "VALIDATE_HWID") {
+            handleHWIDCheck(clientSocket, clientIP, data);
+        }
+        else if (command == "SECURITY_REPORT") {
+            handleSecurityReport(clientIP, data);
+        }
+        else if (command == "STATUS_UPDATE") {
+            handleStatusUpdate(clientIP, data);
+        }
+        else {
+            logger.logWarning("Unknown command from " + clientIP + ": " + command);
+            sendResponse(clientSocket, "ERROR:Unknown command");
+        }
+    }
+
+    void handleHWIDCheck(Socket clientSocket, const std::string& clientIP,
+        const std::string& hwid) {
+        // Trim whitespace dari HWID
+        std::string cleanHWID = hwid;
+        cleanHWID.erase(0, cleanHWID.find_first_not_of(" \t\r\n"));
+        cleanHWID.erase(cleanHWID.find_last_not_of(" \t\r\n") + 1);
+
+        bool allowed = isHWIDAllowed(cleanHWID);
+
+        // Logging dengan format yang lebih spesifik
+        if (allowed) {
+            logger.logClientHWIDCheck(clientIP, cleanHWID, true);
+            sendResponse(clientSocket, "VALIDATION_SUCCESS");
+        }
+        else {
+            logger.logClientHWIDCheck(clientIP, cleanHWID, false);
+            sendResponse(clientSocket, "VALIDATION_FAILED");
+
+            logger.logSecurity("Unauthorized HWID attempt from " + clientIP +
+                " with HWID: " + cleanHWID);
+        }
+    }
+
+    void handleSecurityReport(const std::string& clientIP, const std::string& report) {
+        logger.logClientSecurityAlert(clientIP, "CLIENT_REPORT", report);
+        // Here you could save the report to database or take other actions
+    }
+
+    void handleStatusUpdate(const std::string& clientIP, const std::string& status) {
+        logger.logInfo("Status update from " + clientIP + ": " + status);
+        // Process status update
+    }
+
+    bool isHWIDAllowed(const std::string& hwid) {
+        // Trim whitespace for comparison
+        std::string cleanHWID = hwid;
+        cleanHWID.erase(0, cleanHWID.find_first_not_of(" \t\r\n"));
+        cleanHWID.erase(cleanHWID.find_last_not_of(" \t\r\n") + 1);
+
+        return std::find(allowedHWIDs.begin(), allowedHWIDs.end(), cleanHWID) != allowedHWIDs.end();
+    }
+
+    void loadAllowedHWIDs() {
+        allowedHWIDs.clear();
+        std::ifstream file("allowed_hwids.txt");
+
+        if (!file.is_open()) {
+            logger.logWarning("Could not open allowed_hwids.txt, no HWIDs loaded");
+            return;
+        }
+
+        std::string line;
+        while (std::getline(file, line)) {
+            // Remove whitespace and empty lines
+            line.erase(0, line.find_first_not_of(" \t\r\n"));
+            line.erase(line.find_last_not_of(" \t\r\n") + 1);
+
+            if (!line.empty()) {
+                allowedHWIDs.push_back(line);
+            }
+        }
+
+        file.close();
+        logger.logInfo("Loaded " + std::to_string(allowedHWIDs.size()) + " allowed HWIDs");
+    }
+
+    void sendResponse(Socket clientSocket, const std::string& response) {
+        // Kirim response tanpa karakter tambahan
+        std::string cleanResponse = response;
+        // Clean any potential whitespace
+        cleanResponse.erase(0, cleanResponse.find_first_not_of(" \t\r\n"));
+        cleanResponse.erase(cleanResponse.find_last_not_of(" \t\r\n") + 1);
+
+        logger.logDebug("Sending response: '" + cleanResponse + "'");
+        send(clientSocket, cleanResponse.c_str(), cleanResponse.length(), 0);
+    }
+
+    void stop() {
+        if (serverRunning) {
+            logger.logInfo("Stopping OblivionEye Server...");
+            serverRunning = false;
+
+            if (serverSocket != INVALID_SOCKET_VAL) {
+                closesocket(serverSocket);
+                serverSocket = INVALID_SOCKET_VAL;
+            }
+
+#ifdef _WIN32
+            WSACleanup();
+#endif
+
+            logger.logInfo("Server stopped");
+        }
+    }
+
+    void showStatus() {
+        std::lock_guard<std::mutex> lock(clientMutex);
+        logger.logInfo("=== Server Status ===");
+        logger.logInfo("Connected clients: " + std::to_string(connectedClients.size()));
+
+        for (const auto& client : connectedClients) {
+            logger.logInfo("  - " + client);
+        }
+
+        logger.logInfo("Allowed HWIDs: " + std::to_string(allowedHWIDs.size()));
+        logger.logInfo("====================");
+    }
+
+    ServerLogger& getLogger() {
+        return logger;
+    }
+};
+
+// Global server instance
+OblivionEyeServer* g_server = nullptr;
+std::atomic<bool> g_running(true);
+
+// Signal handler for graceful shutdown
+void signalHandler(int signal) {
+    std::cout << "\nReceived signal " << signal << ", shutting down..." << std::endl;
+    g_running = false;
+    if (g_server) {
+        g_server->stop();
+    }
+}
+
+void showHelp() {
+    std::cout << "OblivionEye Server Commands:" << std::endl;
+    std::cout << "  help     - Show this help" << std::endl;
+    std::cout << "  status   - Show server status" << std::endl;
+    std::cout << "  reload   - Reload allowed HWIDs" << std::endl;
+    std::cout << "  quit     - Shutdown server" << std::endl;
+    std::cout << "  exit     - Shutdown server" << std::endl;
+}
+
+int main(int argc, char* argv[]) {
+    std::cout << "==================================" << std::endl;
+    std::cout << "  OblivionEye Anti-Cheat Server   " << std::endl;
+    std::cout << "==================================" << std::endl;
+
+    int port = 8900;  // Default port 8900
+    if (argc > 1) {
+        port = std::atoi(argv[1]);
+        if (port <= 0 || port > 65535) {
+            std::cerr << "Invalid port number. Using default port 8900." << std::endl;
+            port = 8900;
+        }
+    }
+
+    // Setup signal handlers
+    signal(SIGINT, signalHandler);
+    signal(SIGTERM, signalHandler);
+#ifdef _WIN32
+    signal(SIGBREAK, signalHandler);
+#endif
+
+    // Create and start server
+    OblivionEyeServer server(port);
+    g_server = &server;
+
+    if (!server.start()) {
+        std::cerr << "Failed to start server!" << std::endl;
+        return 1;
+    }
+
+    std::cout << "Server started on port " << port << ". Type 'help' for commands." << std::endl;
+
+    // Command loop
+    std::string command;
+    while (g_running) {
+        std::cout << "> ";
+        if (std::getline(std::cin, command)) {
+            // Trim whitespace
+            command.erase(0, command.find_first_not_of(" \t\r\n"));
+            command.erase(command.find_last_not_of(" \t\r\n") + 1);
+
+            if (command == "help") {
+                showHelp();
+            }
+            else if (command == "status") {
+                server.showStatus();
+            }
+            else if (command == "reload") {
+                server.loadAllowedHWIDs();
+                server.getLogger().logInfo("HWID list reloaded");
+            }
+            else if (command == "quit" || command == "exit") {
+                g_running = false;
+                break;
+            }
+            else if (!command.empty()) {
+                std::cout << "Unknown command: " << command << std::endl;
+                std::cout << "Type 'help' for available commands." << std::endl;
             }
         }
         else {
-            ServerLogger::Log(S_LOG_WARNING, "Client #" + std::to_string(clientNumber) + " sent unknown command or invalid format. Data: '" + receivedData + "'");
-            send(ClientSocket, "ERROR_UNKNOWN_CMD\n", 19, 0);
-        }
-    }
-    else if (iResult == 0) {
-        ServerLogger::Log(S_LOG_CLIENT_CONN, "Client #" + std::to_string(clientNumber) + " closed connection gracefully.");
-    }
-    else {
-        int errorCode = WSAGetLastError();
-        ServerLogger::Log(S_LOG_ERROR, "recv failed for client #" + std::to_string(clientNumber) + ". Error: " + std::to_string(errorCode));
-        // Jika error adalah WSAECONNRESET, itu berarti client memutus koneksi secara tiba-tiba
-        if (errorCode == WSAECONNRESET) {
-            ServerLogger::Log(S_LOG_CLIENT_CONN, "Client #" + std::to_string(clientNumber) + " connection was forcibly closed by the remote host.");
-        }
-    }
-
-    // --- TUTUP KONEKSI ---
-    closesocket(ClientSocket);
-    ServerLogger::Log(S_LOG_CLIENT_CONN, "Client #" + std::to_string(clientNumber) + " connection closed.");
-}
-
-int main() {
-    // Inisialisasi Logger Server
-    ServerLogger::Initialize("server.log");
-
-    WSADATA wsaData;
-    int iResult;
-
-    ServerLogger::Log(S_LOG_INFO, "Starting Oblivion Eye Validation Server...");
-
-    // Inisialisasi Winsock
-    iResult = WSAStartup(MAKEWORD(2, 2), &wsaData);
-    if (iResult != 0) {
-        ServerLogger::Log(S_LOG_ERROR, "WSAStartup failed: " + std::to_string(iResult));
-        std::cerr << "WSAStartup failed: " << iResult << std::endl;
-        ServerLogger::Close();
-        return 1;
-    }
-
-    // --- MUAT DAFTAR HWID DARI FILE ---
-    if (!LoadAllowedHWIDsFromFile(HWID_LIST_FILE)) {
-        ServerLogger::Log(S_LOG_ERROR, "Server cannot start without a valid HWID list. Exiting.");
-        std::cerr << "Server cannot start without a valid HWID list. Exiting." << std::endl;
-        WSACleanup();
-        ServerLogger::Close();
-        return 1;
-    }
-    // ----------------------------------
-
-    struct addrinfo* result = NULL;
-    struct addrinfo hints;
-
-    ZeroMemory(&hints, sizeof(hints));
-    hints.ai_family = AF_INET;
-    hints.ai_socktype = SOCK_STREAM;
-    hints.ai_protocol = IPPROTO_TCP;
-    hints.ai_flags = AI_PASSIVE;
-
-    // Resolve the server address and port
-    iResult = getaddrinfo(NULL, DEFAULT_PORT, &hints, &result);
-    if (iResult != 0) {
-        ServerLogger::Log(S_LOG_ERROR, "getaddrinfo failed: " + std::to_string(iResult));
-        std::cerr << "getaddrinfo failed: " << iResult << std::endl;
-        WSACleanup();
-        ServerLogger::Close();
-        return 1;
-    }
-
-    // Create a SOCKET for connecting to server
-    SOCKET ListenSocket = socket(result->ai_family, result->ai_socktype, result->ai_protocol);
-    if (ListenSocket == INVALID_SOCKET) {
-        int errorCode = WSAGetLastError();
-        ServerLogger::Log(S_LOG_ERROR, "Error at socket(): " + std::to_string(errorCode));
-        std::cerr << "Error at socket(): " << errorCode << std::endl;
-        freeaddrinfo(result);
-        WSACleanup();
-        ServerLogger::Close();
-        return 1;
-    }
-
-    // Setup the TCP listening socket
-    iResult = bind(ListenSocket, result->ai_addr, (int)result->ai_addrlen);
-    if (iResult == SOCKET_ERROR) {
-        int errorCode = WSAGetLastError();
-        ServerLogger::Log(S_LOG_ERROR, "bind failed with error: " + std::to_string(errorCode));
-        std::cerr << "bind failed with error: " << errorCode << std::endl;
-        freeaddrinfo(result);
-        closesocket(ListenSocket);
-        WSACleanup();
-        ServerLogger::Close();
-        return 1;
-    }
-
-    freeaddrinfo(result);
-
-    iResult = listen(ListenSocket, SOMAXCONN);
-    if (iResult == SOCKET_ERROR) {
-        int errorCode = WSAGetLastError();
-        ServerLogger::Log(S_LOG_ERROR, "listen failed with error: " + std::to_string(errorCode));
-        std::cerr << "listen failed with error: " << errorCode << std::endl;
-        closesocket(ListenSocket);
-        WSACleanup();
-        ServerLogger::Close();
-        return 1;
-    }
-
-    ServerLogger::Log(S_LOG_INFO, "Oblivion Eye Validation Server is running on port " + std::string(DEFAULT_PORT));
-    ServerLogger::Log(S_LOG_INFO, "Using HWID list from: " + std::string(HWID_LIST_FILE));
-    std::cout << "========================================" << std::endl;
-    std::cout << "Oblivion Eye Validation Server is running on port " << DEFAULT_PORT << std::endl;
-    std::cout << "Using HWID list from: " << HWID_LIST_FILE << std::endl;
-    std::cout << "========================================" << std::endl;
-    std::cout << "Waiting for client connections..." << std::endl;
-    std::cout << "(Check logs/server.log for detailed logs)" << std::endl;
-
-    // --- LOOP UTAMA SERVER ---
-    int clientCounter = 0;
-    while (true) {
-        // Accept a client socket
-        SOCKET ClientSocket = accept(ListenSocket, NULL, NULL);
-        if (ClientSocket == INVALID_SOCKET) {
-            int err = WSAGetLastError();
-            ServerLogger::Log(S_LOG_ERROR, "accept failed: " + std::to_string(err));
-            std::cerr << "accept failed: " << err << std::endl;
-            // Lanjutkan menunggu client lain meskipun ada error accept
-            continue;
+            // EOF or error
+            break;
         }
 
-        clientCounter++;
-        // --- BUAT THREAD BARU UNTUK MENANGANI CLIENT ---
-        // Ini memungkinkan server menangani banyak client secara bersamaan
-        std::thread clientThread(HandleClient, ClientSocket, clientCounter);
-        // Detach thread agar bisa berjalan independen
-        clientThread.detach();
+        // Small delay to prevent busy waiting
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
 
-    // Cleanup (kode ini tidak akan pernah tercapai dalam loop while(true))
-    closesocket(ListenSocket);
-    WSACleanup();
-    ServerLogger::Close();
+    server.stop();
+    std::cout << "Server shutdown complete." << std::endl;
+
     return 0;
 }
