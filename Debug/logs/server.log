@@ -9,3 +9,13 @@
 [2025-08-08 13:58:14.190] [INFO] Heartbeat monitoring started
 [2025-08-08 13:58:14.190] [INFO] Server main loop started
 [2025-08-08 13:58:17.969] [INFO] Client connected from 127.0.0.1:61608
+[2025-08-08 22:31:26.693] [INFO] Loaded 4 allowed HWIDs
+[2025-08-08 22:31:26.696] [INFO] DEBUG: Encryption initialized with key length: 23
+[2025-08-08 22:31:26.699] [INFO] Initializing OblivionEye Server...
+[2025-08-08 22:31:26.708] [INFO] OblivionEye Server started on port 8900
+[2025-08-08 22:31:26.709] [INFO] Allowed HWIDs loaded: 4
+[2025-08-08 22:31:26.710] [INFO] Encryption: ENABLED
+[2025-08-08 22:31:26.713] [INFO] Heartbeat monitoring started
+[2025-08-08 22:31:26.714] [INFO] Server main loop started
+[2025-08-08 22:31:39.550] [INFO] Client connected from 127.0.0.1:65350
+[2025-08-08 22:32:47.562] [INFO] Client disconnected from 127.0.0.1:65350
