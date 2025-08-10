@@ -115,7 +115,7 @@ git clone https://github.com/Hansel38/Oblivion.git
 cd Oblivion
 Buka Project di Visual Studio 2022
 Platform Toolset: v143
-C++ Language Standard: ISO C++20
+C++ Language Standard: ISO C++17 atau C++20
 Build Client dan Server
 Gunakan Release Mode untuk produksi.
 Compile OblivionEye_Client dan OblivionEye_Server.
