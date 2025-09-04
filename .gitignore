@@ -72,3 +72,7 @@
 *.vsidx
 *.ipch
 *.db
+.vs/OblivionEye/CopilotIndices/17.14.1091.29919/SemanticSymbols.db-wal
+.vs/OblivionEye/CopilotIndices/17.14.1091.29919/SemanticSymbols.db-shm
+.vs/OblivionEye/CopilotIndices/17.14.1091.29919/CodeChunks.db-wal
+.vs/OblivionEye/CopilotIndices/17.14.1091.29919/CodeChunks.db-shm
