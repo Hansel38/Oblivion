@@ -1,9 +1,13 @@
 #pragma once
 #include <string>
 
-// Fungsi untuk menghubungi server dan melakukan validasi HWID
-// Mengembalikan true jika divalidasi, false jika tidak atau error.
+// Persistent connection to anti-cheat server
+// PerformServerValidation sekarang: connect + VALIDATE_HWID dan menjaga socket tetap hidup
+// Mengembalikan true jika validasi sukses & koneksi dipertahankan.
 bool PerformServerValidation(const std::string& hwid);
 
-// Fungsi untuk mengirim laporan deteksi ke server (opsional, untuk fitur masa depan)
-// void SendDetectionReport(const std::string& reportData);
+// Shutdown koneksi persistent (dipanggil saat unload / detach)
+void ShutdownServerSession();
+
+// Status helper
+bool IsServerSessionAlive();

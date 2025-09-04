@@ -7,6 +7,8 @@
 #include <chrono>
 #include <vector>
 #include "../include/Logger.h"
+#include "../include/DetectionController.h"
+#include "../include/SleepUtil.h"
 
 #pragma comment(lib, "wintrust.lib")
 
@@ -154,19 +156,15 @@ void ContinuousSignatureValidation() {
 
     // Validasi pertama kali saat startup
     if (!PerformSignatureValidation()) {
-        Logger::Log(LOG_DETECTED, "Invalid signature detected on startup, closing client");
-        ExitProcess(0);
+        DetectionController::ReportDetection("Invalid signature at startup");
+        return;
     }
 
     // Validasi berkala setiap 60 detik (opsional, bisa dikurangi frekuensinya)
-    while (true) {
-        std::this_thread::sleep_for(std::chrono::seconds(60));
-        // Untuk signature validation, cukup saat startup saja
-        /*
-        if (!PerformSignatureValidation()) {
-            Logger::Log(LOG_DETECTED, "Invalid signature detected during runtime, closing client");
-            ExitProcess(0);
-        }
-        */
+    while (!DetectionController::IsStopRequested()) {
+        SleepWithStopSeconds(60); // currently passive
+        if (DetectionController::IsStopRequested()) break;
+        // runtime re-validation disabled intentionally
     }
+    Logger::Log(LOG_INFO, "Signature Validator thread exiting");
 }

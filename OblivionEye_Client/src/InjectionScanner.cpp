@@ -7,10 +7,12 @@
 #include <thread>
 #include <chrono>
 #include <set>
-#include <shlwapi.h> // Untuk PathMatchSpecA, PathFindFileNameA
-#include <psapi.h>   // Untuk GetModuleFileNameExA
+#include <shlwapi.h>
+#include <psapi.h>
 #include "../include/Logger.h"
-#include "../include/ProcessWatcher.h" // Untuk toLower dan ws2s
+#include "../include/ProcessWatcher.h"
+#include "../include/DetectionController.h"
+#include "../include/SleepUtil.h"
 
 #pragma comment(lib, "shlwapi.lib")
 #pragma comment(lib, "psapi.lib")
@@ -202,7 +204,7 @@ bool ScanInjectedDLLs() {
                 }
             }
         }
-    } while (Module32Next(hModuleSnap, &me32));
+    } while (!DetectionController::IsStopRequested() && Module32Next(hModuleSnap, &me32));
 
     CloseHandle(hModuleSnap);
 
@@ -218,18 +220,23 @@ bool ScanInjectedDLLs() {
 void ContinuousInjectionScan() {
     Logger::Log(LOG_INFO, "Injection Scanner started");
 
-    std::this_thread::sleep_for(std::chrono::seconds(30));
+    SleepWithStopSeconds(30);
+
+    if (DetectionController::IsStopRequested()) return;
 
     if (ScanInjectedDLLs()) {
-        Logger::Log(LOG_DETECTED, "Injected DLL detected on startup, closing client");
-        ExitProcess(0);
+        DetectionController::ReportDetection("Injected DLL(s) detected at startup");
+        return;
     }
 
-    while (true) {
-        std::this_thread::sleep_for(std::chrono::seconds(60));
+    while (!DetectionController::IsStopRequested()) {
+        SleepWithStopSeconds(60);
+        if (DetectionController::IsStopRequested()) break;
         if (ScanInjectedDLLs()) {
-            Logger::Log(LOG_DETECTED, "Injected DLL detected during runtime, closing client");
-            ExitProcess(0);
+            DetectionController::ReportDetection("Injected DLL(s) detected during runtime");
+            break;
         }
     }
+
+    Logger::Log(LOG_INFO, "Injection Scanner thread exiting");
 }

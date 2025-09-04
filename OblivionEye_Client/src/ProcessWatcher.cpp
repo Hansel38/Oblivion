@@ -8,6 +8,9 @@
 #include <chrono>
 #include "../include/Blacklist.h"
 #include "../include/Logger.h"
+#include "../include/Config.h"
+#include "../include/DetectionController.h"
+#include "../include/SleepUtil.h"
 
 // Set untuk menyimpan proses yang sudah discan (hanya untuk blacklist)
 std::set<std::string> scannedBlacklistProcesses;
@@ -42,7 +45,7 @@ bool ScanRunningProcesses() {
                         Logger::Log(LOG_INFO, "BLACKLIST HIT - Scanning process: " + currentProcessName);
 
                         CloseHandle(hSnap);
-                        Logger::Log(LOG_DETECTED, "CHEAT DETECTED: " + blacklisted);
+                        DetectionController::ReportDetection(Config::Get().cheatDetectedPrefix + std::string(" ") + blacklisted);
                         MessageBoxA(NULL, ("Cheat Detected: " + blacklisted).c_str(), "Oblivion Eye", MB_ICONERROR);
                         return true; // Terdeteksi cheat
                     }
@@ -57,23 +60,20 @@ bool ScanRunningProcesses() {
 
 // Fungsi untuk scanning continuous
 void ContinuousProcessScan() {
+    auto& cfg = Config::Get();
     Logger::Log(LOG_INFO, "Process Watcher started");
 
-    // Delay awal 5 detik untuk menghindari deteksi awal yang tidak perlu
-    std::this_thread::sleep_for(std::chrono::seconds(5));
-
+    SleepWithStopSeconds(cfg.processInitialDelaySec);
+    if (DetectionController::IsStopRequested()) return;
     // Scan pertama kali saat startup
-    if (ScanRunningProcesses()) {
-        Logger::Log(LOG_DETECTED, "Cheat detected on startup, closing client");
-        ExitProcess(0); // Tutup client jika terdeteksi
+    if (ScanRunningProcesses()) return; // detection will signal stop
+
+    // Scan terus-menerus setiap interval yang diatur dalam konfigurasi
+    while (!DetectionController::IsStopRequested()) {
+        SleepWithStopSeconds(cfg.processIntervalSec);
+        if (DetectionController::IsStopRequested()) break;
+        if (ScanRunningProcesses()) break;
     }
 
-    // Scan terus-menerus setiap 5 detik
-    while (true) {
-        std::this_thread::sleep_for(std::chrono::seconds(5)); // Naikkan ke 5 detik
-        if (ScanRunningProcesses()) {
-            Logger::Log(LOG_DETECTED, "Cheat detected during runtime, closing client");
-            ExitProcess(0); // Tutup client jika terdeteksi
-        }
-    }
+    Logger::Log(LOG_INFO, "Process Watcher thread exiting");
 }

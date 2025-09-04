@@ -4,104 +4,79 @@
 #include <chrono>
 #include <iostream>
 #include "../include/Logger.h"
+#include "../include/Config.h"
 
 static bool antiSuspendRunning = false;
-static HANDLE monitoredThread = nullptr;
+static HANDLE monitoredThread = nullptr; // real handle (duplicated) to the main anti-cheat thread
 static std::thread antiSuspendThread;
+
+// Helper to close handle safely
+static void CloseHandleSafe(HANDLE &h) {
+    if (h && h != INVALID_HANDLE_VALUE) {
+        CloseHandle(h);
+        h = nullptr;
+    }
+}
 
 // Fungsi untuk memeriksa apakah thread masih aktif
 bool IsThreadActive(HANDLE threadHandle) {
-    if (threadHandle == nullptr || threadHandle == INVALID_HANDLE_VALUE) {
-        return false;
-    }
-
-    // Dapatkan status thread
-    DWORD exitCode = 0;
-    if (GetExitCodeThread(threadHandle, &exitCode)) {
-        // Jika thread masih berjalan, exit code adalah STILL_ACTIVE
-        if (exitCode == STILL_ACTIVE) {
-            return true;
-        }
-    }
-
-    return false;
+    if (!threadHandle || threadHandle == INVALID_HANDLE_VALUE) return false;
+    // WaitForSingleObject dengan timeout 0: jika masih aktif status WAIT_TIMEOUT
+    DWORD waitRes = WaitForSingleObject(threadHandle, 0);
+    return waitRes == WAIT_TIMEOUT; // masih berjalan
 }
 
-// Fungsi untuk memeriksa apakah thread di-suspend
-bool IsThreadSuspended(HANDLE threadHandle) {
-    if (threadHandle == nullptr || threadHandle == INVALID_HANDLE_VALUE) {
-        return true; // Dianggap suspended jika handle tidak valid
-    }
-
-    // Coba dapatkan context thread
-    CONTEXT context;
-    context.ContextFlags = CONTEXT_CONTROL;
-
-    // Jika tidak bisa mendapatkan context, kemungkinan thread di-suspend
-    if (!GetThreadContext(threadHandle, &context)) {
-        DWORD lastError = GetLastError();
-        // ERROR_ACCESS_DENIED atau ERROR_INVALID_PARAMETER bisa menunjukkan thread suspended
-        if (lastError == ERROR_ACCESS_DENIED || lastError == ERROR_INVALID_PARAMETER) {
-            return true;
-        }
-    }
-
-    return false;
-}
-
-// Fungsi watchdog untuk memantau thread
+// Watchdog sederhana – hanya pastikan thread target belum selesai / di-terminate.
+// (Deteksi suspend agresif dihapus karena teknik sebelumnya menggunakan pseudo handle dan GetThreadContext
+//  berpotensi tidak valid / menghasilkan false positive / crash di beberapa environment.)
 void AntiSuspendWatchdog() {
+    auto& cfg = Config::Get();
     Logger::Log(LOG_INFO, "Anti-Suspend Thread started");
-
     while (antiSuspendRunning) {
-        if (monitoredThread != nullptr) {
-            // Cek apakah thread masih aktif
-            if (!IsThreadActive(monitoredThread)) {
-                Logger::Log(LOG_DETECTED, "Monitored thread is not active");
-                ExitProcess(0);
+        try {
+            if (monitoredThread) {
+                if (!IsThreadActive(monitoredThread)) {
+                    Logger::Log(LOG_DETECTED, "Monitored thread not active anymore (terminated)");
+                    ExitProcess(0);
+                }
             }
-
-            // Cek apakah thread di-suspend
-            if (IsThreadSuspended(monitoredThread)) {
-                Logger::Log(LOG_DETECTED, "Thread suspension detected - possible anti-cheat bypass attempt");
-                ExitProcess(0);
-            }
+        } catch (...) {
+            // Jangan biarkan exception mematikan proses tanpa log
+            Logger::Log(LOG_ERROR, "Exception in AntiSuspendWatchdog loop (continuing)");
         }
-
-        // Tidur sebentar untuk menghindari penggunaan CPU berlebih
-        std::this_thread::sleep_for(std::chrono::milliseconds(500));
+        std::this_thread::sleep_for(std::chrono::milliseconds(cfg.antiSuspendIntervalMs));
     }
-
     Logger::Log(LOG_INFO, "Anti-Suspend Thread stopped");
 }
 
-// Fungsi untuk memulai thread anti-suspend
 void StartAntiSuspendThread(HANDLE mainThreadHandle) {
-    if (antiSuspendRunning) {
-        return; // Sudah berjalan
+    if (antiSuspendRunning) return;
+
+    // Ubah pseudo handle menjadi real handle yang bisa dipakai thread lain.
+    // mainThreadHandle yang diteruskan (GetCurrentThread dari thread utama anti-cheat) kemungkinan pseudo handle (-2).
+    HANDLE duplicated = nullptr;
+    if (!DuplicateHandle(GetCurrentProcess(),
+                         mainThreadHandle,
+                         GetCurrentProcess(),
+                         &duplicated,
+                         THREAD_QUERY_INFORMATION | SYNCHRONIZE, // hak minimum yang kita butuhkan sekarang
+                         FALSE,
+                         0)) {
+        Logger::Log(LOG_WARNING, "Failed to duplicate main thread handle for Anti-Suspend (GetLastError=" + std::to_string(GetLastError()) + ")");
+        return; // jangan mulai watchdog tanpa handle valid
     }
 
-    monitoredThread = mainThreadHandle;
+    monitoredThread = duplicated;
     antiSuspendRunning = true;
-
-    // Buat thread watchdog
     antiSuspendThread = std::thread(AntiSuspendWatchdog);
-
-    // Detach thread agar bisa berjalan independen
-    // Tapi kita simpan handle untuk kontrol lebih lanjut
-    if (antiSuspendThread.joinable()) {
-        // Jangan detach dulu, kita butuh kontrol
-    }
 }
 
-// Fungsi untuk menghentikan thread anti-suspend
 void StopAntiSuspendThread() {
-    if (antiSuspendRunning) {
-        antiSuspendRunning = false;
-
-        // Tunggu thread selesai
-        if (antiSuspendThread.joinable()) {
-            antiSuspendThread.join();
-        }
+    if (!antiSuspendRunning) {
+        CloseHandleSafe(monitoredThread);
+        return;
     }
+    antiSuspendRunning = false;
+    if (antiSuspendThread.joinable()) antiSuspendThread.join();
+    CloseHandleSafe(monitoredThread);
 }

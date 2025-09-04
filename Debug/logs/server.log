@@ -1,21 +1,13 @@
-[2025-08-08 13:54:29.186] [INFO] Client connected from 127.0.0.1:61558
-[2025-08-08 13:54:32.674] [INFO] Client disconnected from 127.0.0.1:61558
-[2025-08-08 13:58:14.179] [INFO] Loaded 4 allowed HWIDs
-[2025-08-08 13:58:14.181] [INFO] DEBUG: Encryption initialized with key length: 23
-[2025-08-08 13:58:14.182] [INFO] Initializing OblivionEye Server...
-[2025-08-08 13:58:14.186] [INFO] OblivionEye Server started on port 8900
-[2025-08-08 13:58:14.187] [INFO] Allowed HWIDs loaded: 4
-[2025-08-08 13:58:14.187] [INFO] Encryption: ENABLED
-[2025-08-08 13:58:14.190] [INFO] Heartbeat monitoring started
-[2025-08-08 13:58:14.190] [INFO] Server main loop started
-[2025-08-08 13:58:17.969] [INFO] Client connected from 127.0.0.1:61608
-[2025-08-08 22:31:26.693] [INFO] Loaded 4 allowed HWIDs
-[2025-08-08 22:31:26.696] [INFO] DEBUG: Encryption initialized with key length: 23
-[2025-08-08 22:31:26.699] [INFO] Initializing OblivionEye Server...
-[2025-08-08 22:31:26.708] [INFO] OblivionEye Server started on port 8900
-[2025-08-08 22:31:26.709] [INFO] Allowed HWIDs loaded: 4
-[2025-08-08 22:31:26.710] [INFO] Encryption: ENABLED
-[2025-08-08 22:31:26.713] [INFO] Heartbeat monitoring started
-[2025-08-08 22:31:26.714] [INFO] Server main loop started
-[2025-08-08 22:31:39.550] [INFO] Client connected from 127.0.0.1:65350
-[2025-08-08 22:32:47.562] [INFO] Client disconnected from 127.0.0.1:65350
+[2025-09-04 23:53:18.720] [INFO] Loaded 4 allowed HWIDs
+[2025-09-04 23:53:18.732] [INFO] DEBUG: Encryption initialized with key length: 23
+[2025-09-04 23:53:18.733] [INFO] Initializing OblivionEye Server...
+[2025-09-04 23:53:18.748] [INFO] OblivionEye Server started on port 8900
+[2025-09-04 23:53:18.782] [INFO] Allowed HWIDs loaded: 4
+[2025-09-04 23:53:18.783] [INFO] Encryption: ENABLED
+[2025-09-04 23:53:18.785] [INFO] Server main loop started
+[2025-09-04 23:53:18.786] [INFO] Heartbeat monitoring started
+[2025-09-04 23:53:33.223] [INFO] Client connected from 127.0.0.1:55039
+[2025-09-04 23:53:33.225] [INFO] HWID check for 507197e7 from 127.0.0.1: ALLOWED
+[2025-09-04 23:54:27.654] [WARN] Recv error from 127.0.0.1:55039 code=10054
+[2025-09-04 23:54:27.655] [INFO] Client disconnected from 127.0.0.1:55039
+[2025-09-04 23:54:27.657] [INFO] Client disconnected from 127.0.0.1:55039

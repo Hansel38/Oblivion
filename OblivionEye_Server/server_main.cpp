@@ -15,6 +15,9 @@
 #include <map>
 #include <memory>
 
+// Global encryption handler pointer for heartbeat usage
+EncryptionHandler* g_encryptionHandler = nullptr;
+
 #ifdef _MSC_VER
 #define _WINSOCK_DEPRECATED_NO_WARNINGS
 #endif
@@ -31,6 +34,7 @@ using Socket = SOCKET;
 #include <arpa/inet.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include <errno.h>
 using Socket = int;
 #define INVALID_SOCKET_VAL -1
 #define closesocket close
@@ -69,6 +73,7 @@ public:
         loadAllowedHWIDs();
 
         encryptionHandler = std::make_unique<EncryptionHandler>("OblivionEye_Secret_2025");
+        g_encryptionHandler = encryptionHandler.get();
         logger.logInfo("DEBUG: Encryption initialized with key length: " +
             std::to_string(std::string("OblivionEye_Secret_2025").length()));
 
@@ -178,6 +183,18 @@ public:
             activeClients.emplace(clientKey, ClientSession(clientSocket, clientIP, clientPort));
         }
 
+        // Set recv timeout (1s) so we can enforce HWID validation grace period even if client silent
+#ifdef _WIN32
+        DWORD timeoutMs = 1000;
+        setsockopt(clientSocket, SOL_SOCKET, SO_RCVTIMEO, (const char*)&timeoutMs, sizeof(timeoutMs));
+#else
+        struct timeval tv; tv.tv_sec = 1; tv.tv_usec = 0;
+        setsockopt(clientSocket, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+#endif
+
+        const auto connectionStart = std::chrono::steady_clock::now();
+        const auto hwidGracePeriod = std::chrono::seconds(5); // must send VALIDATE_HWID within 5s
+
         char buffer[4096];
         int bytesReceived;
 
@@ -185,12 +202,56 @@ public:
             bytesReceived = recv(clientSocket, buffer, sizeof(buffer) - 1, 0);
             if (bytesReceived > 0) {
                 buffer[bytesReceived] = '\0';
+
                 std::string decryptedMessage = encryptionHandler->decryptMessage(buffer);
+
+                if (devMode) {
+                    logger.logDebug("DEV RAW payload length=" + std::to_string(bytesReceived));
+                    logger.logDebug("DEV Decrypted message: '" + decryptedMessage + "'");
+                }
+
                 processClientMessage(clientSocket, clientIP, clientPort, decryptedMessage);
             }
-            else {
-                logger.logClientDisconnection(clientIP, clientPort);
+            else if (bytesReceived == 0) { // graceful close
+                logger.logInfo("Client closed connection gracefully: " + clientIP + ":" + std::to_string(clientPort));
                 break;
+            }
+            else { // bytesReceived < 0
+#ifdef _WIN32
+                int err = WSAGetLastError();
+                if (err == WSAEWOULDBLOCK || err == WSAETIMEDOUT) {
+                    // timeout - allow loop to continue to check grace period / heartbeat
+                }
+                else {
+                    logger.logWarning("Recv error from " + clientKey + " code=" + std::to_string(err));
+                    logger.logClientDisconnection(clientIP, clientPort);
+                    break;
+                }
+#else
+                if (errno == EWOULDBLOCK || errno == EAGAIN) {
+                    // timeout - continue
+                }
+                else {
+                    logger.logWarning("Recv error from " + clientKey + " errno=" + std::to_string(errno) + " msg=" + std::string(strerror(errno)));
+                    logger.logClientDisconnection(clientIP, clientPort);
+                    break;
+                }
+#endif
+            }
+
+            // Enforce HWID validation within grace period
+            bool authenticated = false;
+            {
+                std::lock_guard<std::mutex> lock(clientsMutex);
+                auto it = activeClients.find(clientKey);
+                if (it != activeClients.end()) authenticated = it->second.isAuthenticated;
+            }
+            if (!authenticated) {
+                auto elapsed = std::chrono::steady_clock::now() - connectionStart;
+                if (elapsed > hwidGracePeriod) {
+                    logger.logSecurity("Client did not send VALIDATE_HWID within grace period (" + clientKey + ") - closing connection");
+                    break; // will trigger disconnect handling below
+                }
             }
         }
 
@@ -200,6 +261,7 @@ public:
         }
 
         closesocket(clientSocket);
+        logger.logClientDisconnection(clientIP, clientPort);
     }
 
     void processClientMessage(Socket clientSocket, const std::string& clientIP, int clientPort,
@@ -217,6 +279,13 @@ public:
         if (message.rfind("VALIDATE_HWID:", 0) == 0) {
             handleHWIDCheck(clientSocket, clientIP, clientPort, message.substr(14));
         }
+        else if (message == "HEARTBEAT_PONG" || message == "HEARTBEAT") {
+            // Already updated heartbeat above; optional extra log
+            if (devMode) logger.logDebug("Heartbeat pong received from " + clientKey);
+        }
+        else {
+            if (devMode) logger.logDebug("Unknown message from " + clientKey + ": " + message);
+        }
     }
 
     void handleHWIDCheck(Socket clientSocket, const std::string& clientIP, int clientPort,
@@ -230,6 +299,12 @@ public:
 
         if (allowed) {
             logger.logClientHWIDCheck(clientIP, cleanHWID, true);
+            // Mark authenticated
+            {
+                std::lock_guard<std::mutex> lock(clientsMutex);
+                auto it = activeClients.find(clientIP + ":" + std::to_string(clientPort));
+                if (it != activeClients.end()) it->second.isAuthenticated = true;
+            }
             sendResponse(clientSocket, "VALIDATION_SUCCESS");
         }
         else {
@@ -241,6 +316,11 @@ public:
                 std::ofstream file("allowed_hwids.txt", std::ios::app);
                 if (file.is_open()) {
                     file << cleanHWID << "\n";
+                }
+                {
+                    std::lock_guard<std::mutex> lock(clientsMutex);
+                    auto it = activeClients.find(clientIP + ":" + std::to_string(clientPort));
+                    if (it != activeClients.end()) it->second.isAuthenticated = true; // auto auth in dev
                 }
                 sendResponse(clientSocket, "VALIDATION_SUCCESS");
             }

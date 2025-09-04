@@ -1,5 +1,8 @@
 #include "HeartbeatManager.h"
 #include <iostream>
+#include "EncryptionHandler.h"
+
+extern EncryptionHandler* g_encryptionHandler; // from server_main
 
 void HeartbeatManager::startMonitoring() {
     std::thread([this]() {
@@ -55,8 +58,11 @@ void HeartbeatManager::startMonitoring() {
 
 void HeartbeatManager::sendHeartbeatPing(ClientSession& session) {
     std::string pingMessage = "HEARTBEAT_PING";
+    if (g_encryptionHandler) {
+        pingMessage = g_encryptionHandler->encryptMessage(pingMessage);
+    }
 
-    int result = send(session.socket, pingMessage.c_str(), pingMessage.length(), 0);
+    int result = send(session.socket, pingMessage.c_str(), (int)pingMessage.length(), 0);
     if (result == -1) {
         logger.logWarning("Failed to send heartbeat ping to " + session.clientKey);
         session.isValid = false;

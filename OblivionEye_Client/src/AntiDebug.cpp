@@ -3,6 +3,9 @@
 #include <thread>
 #include <chrono>
 #include "../include/Logger.h"
+#include "../include/Config.h"
+#include "../include/DetectionController.h"
+#include "../include/SleepUtil.h"
 
 // Fungsi untuk deteksi debugger dasar
 bool CheckIsDebuggerPresent() {
@@ -16,11 +19,9 @@ bool CheckIsDebuggerPresent() {
 // Fungsi untuk deteksi debugger remote
 bool CheckRemoteDebugger() {
     BOOL isDebuggerPresent = FALSE;
-    if (CheckRemoteDebuggerPresent(GetCurrentProcess(), &isDebuggerPresent)) {
-        if (isDebuggerPresent) {
-            Logger::Log(LOG_DETECTED, "CheckRemoteDebuggerPresent detected debugger");
-            return true;
-        }
+    if (CheckRemoteDebuggerPresent(GetCurrentProcess(), &isDebuggerPresent) && isDebuggerPresent) {
+        Logger::Log(LOG_DETECTED, "CheckRemoteDebuggerPresent detected debugger");
+        return true;
     }
     return false;
 }
@@ -31,31 +32,33 @@ bool PerformAntiDebugChecks() {
     if (CheckIsDebuggerPresent()) return true;
     if (CheckRemoteDebugger()) return true;
 
-    // Hapus timing check karena bisa menyebabkan false positive
-
     return false; // Tidak terdeteksi debugger
 }
 
 // Fungsi untuk scanning continuous
 void ContinuousAntiDebugScan() {
+    auto& cfg = Config::Get();
     Logger::Log(LOG_INFO, "Anti-Debug Scanner started");
 
-    // Delay awal 20 detik untuk menghindari deteksi saat startup
-    std::this_thread::sleep_for(std::chrono::seconds(20));
+    SleepWithStopSeconds(cfg.antiDebugInitialDelaySec);
+    if (DetectionController::IsStopRequested()) return;
 
     // Scan pertama kali saat startup
     if (PerformAntiDebugChecks()) {
-        Logger::Log(LOG_DETECTED, "Debugger detected on startup, closing client");
-        ExitProcess(0);
+        DetectionController::ReportDetection("Debugger detected at startup");
+        return;
     }
 
     // Scan terus-menerus setiap 30 detik (sangat jarang untuk menghindari false positive)
-    while (true) {
-        std::this_thread::sleep_for(std::chrono::seconds(30));
+    while (!DetectionController::IsStopRequested()) {
+        SleepWithStopSeconds(cfg.antiDebugIntervalSec);
+        if (DetectionController::IsStopRequested()) break;
 
         if (PerformAntiDebugChecks()) {
-            Logger::Log(LOG_DETECTED, "Debugger detected during runtime, closing client");
-            ExitProcess(0);
+            DetectionController::ReportDetection("Debugger detected during runtime");
+            break;
         }
     }
+
+    Logger::Log(LOG_INFO, "Anti-Debug Scanner thread exiting");
 }

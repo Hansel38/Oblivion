@@ -1,13 +1,15 @@
 #include "../include/HijackDetector.h"
 #include <windows.h>
 #include <tlhelp32.h>
-#include <psapi.h> // Untuk GetModuleFileNameEx
+#include <psapi.h>
 #include <vector>
 #include <set>
 #include <thread>
 #include <chrono>
 #include "../include/Logger.h"
-#include "../include/ProcessWatcher.h" // Untuk ws2s
+#include "../include/ProcessWatcher.h"
+#include "../include/DetectionController.h"
+#include "../include/SleepUtil.h"
 
 #pragma comment(lib, "psapi.lib")
 
@@ -190,21 +192,25 @@ bool DetectHijackedThreads() {
 void ContinuousHijackDetection() {
     Logger::Log(LOG_INFO, "Hijacked Thread Detector started");
 
-    // Delay awal 60 detik untuk memastikan semua thread game dimuat
-    std::this_thread::sleep_for(std::chrono::seconds(60));
+    SleepWithStopSeconds(60);
+
+    if (DetectionController::IsStopRequested()) return;
 
     // Scan pertama kali saat startup
     if (DetectHijackedThreads()) {
-        Logger::Log(LOG_DETECTED, "Hijacked thread detected on startup, closing client");
-        ExitProcess(0);
+        DetectionController::ReportDetection("Hijacked thread detected at startup");
+        return;
     }
 
     // Scan terus-menerus setiap 90 detik
-    while (true) {
-        std::this_thread::sleep_for(std::chrono::seconds(90));
+    while (!DetectionController::IsStopRequested()) {
+        SleepWithStopSeconds(90);
+        if (DetectionController::IsStopRequested()) break;
         if (DetectHijackedThreads()) {
-            Logger::Log(LOG_DETECTED, "Hijacked thread detected during runtime, closing client");
-            ExitProcess(0);
+            DetectionController::ReportDetection("Hijacked thread detected during runtime");
+            break;
         }
     }
+
+    Logger::Log(LOG_INFO, "Hijacked Thread Detector thread exiting");
 }

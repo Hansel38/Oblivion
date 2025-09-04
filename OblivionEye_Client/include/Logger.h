@@ -1,7 +1,11 @@
 #pragma once
 #include <string>
+#include <mutex>
+#include <condition_variable>
+#include <deque>
+#include <thread>
 
-// Definisikan enum di luar class dengan cara yang lebih kompatibel
+// Log levels
 enum LogLevel {
     LOG_INFO = 0,
     LOG_WARNING = 1,
@@ -16,7 +20,24 @@ public:
     static void Close();
 
 private:
-    static void WriteLog(LogLevel level, const std::string& message);
+    struct LogItem {
+        LogLevel level;
+        std::string message;
+    };
+
+    static void WorkerLoop();
+    static void WriteDirect(const LogItem& item); // only called by worker
     static std::string GetTimestamp();
     static std::string LogLevelToString(LogLevel level);
+
+    // concurrency
+    static std::mutex queueMutex;
+    static std::condition_variable queueCv;
+    static std::deque<LogItem> queue;
+    static std::thread workerThread;
+    static bool workerRunning;
+    static size_t droppedMessages;
+
+    // file
+    static std::string logFilePath;
 };

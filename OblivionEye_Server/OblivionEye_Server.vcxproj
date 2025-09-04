@@ -136,6 +136,9 @@
     <ClInclude Include="include\HeartbeatManager.h" />
     <ClInclude Include="include\ServerLogger.h" />
   </ItemGroup>
+  <ItemGroup>
+    <Text Include="..\Debug\logs\server.log" />
+  </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
   </ImportGroup>
