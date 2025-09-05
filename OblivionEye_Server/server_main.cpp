@@ -222,18 +222,28 @@ public:
                 if (err == WSAEWOULDBLOCK || err == WSAETIMEDOUT) {
                     // timeout - allow loop to continue to check grace period / heartbeat
                 }
+                else if (err == WSAECONNRESET || err == WSAECONNABORTED) {
+                    // Connection reset/aborted by peer - normal disconnect, log as info
+                    logger.logInfo("Client disconnected abruptly: " + clientKey);
+                    break;
+                }
                 else {
+                    // Other genuine errors - log as warning
                     logger.logWarning("Recv error from " + clientKey + " code=" + std::to_string(err));
-                    logger.logClientDisconnection(clientIP, clientPort);
                     break;
                 }
 #else
                 if (errno == EWOULDBLOCK || errno == EAGAIN) {
                     // timeout - continue
                 }
+                else if (errno == ECONNRESET || errno == EPIPE) {
+                    // Connection reset by peer - normal disconnect, log as info
+                    logger.logInfo("Client disconnected abruptly: " + clientKey);
+                    break;
+                }
                 else {
+                    // Other genuine errors - log as warning
                     logger.logWarning("Recv error from " + clientKey + " errno=" + std::to_string(errno) + " msg=" + std::string(strerror(errno)));
-                    logger.logClientDisconnection(clientIP, clientPort);
                     break;
                 }
 #endif
