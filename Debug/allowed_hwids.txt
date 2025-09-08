@@ -1,4 +1,0 @@
-# Contoh isi allowed_hwids.txt
-507197e7
-abcdef12
-34567890
