@@ -25,4 +25,6 @@ namespace OblivionEye {
         if (std::find(g_drv.begin(), g_drv.end(), low) == g_drv.end())
             g_drv.push_back(low);
     }
+
+    void ClearBlacklistedDriverNames() { g_drv.clear(); }
 }

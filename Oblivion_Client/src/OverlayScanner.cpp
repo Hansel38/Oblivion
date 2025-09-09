@@ -4,12 +4,32 @@
 #include "../include/Utils.h"
 #include "../include/Logger.h"
 #include "../include/EventReporter.h"
+#include "../include/PublisherWhitelist.h"
 #include <windows.h>
 #include <thread>
 #include <string>
 #include <algorithm>
 
 namespace OblivionEye {
+
+    static bool IsOwnerProcessTrusted(HWND hwnd) {
+        DWORD pid = 0;
+        GetWindowThreadProcessId(hwnd, &pid);
+        if (!pid) return false;
+        HANDLE hProc = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+        if (!hProc) return false;
+        wchar_t path[MAX_PATH];
+        DWORD size = MAX_PATH;
+        bool trusted = false;
+        if (QueryFullProcessImageNameW(hProc, 0, path, &size)) {
+            // Jika publisher file ini ada di whitelist, anggap overlay ini legitimate
+            if (PublisherWhitelist::IsFileSignedByTrusted(path)) {
+                trusted = true;
+            }
+        }
+        CloseHandle(hProc);
+        return trusted;
+    }
 
     OverlayScanner& OverlayScanner::Instance() { static OverlayScanner s; return s; }
 
@@ -28,6 +48,11 @@ namespace OblivionEye {
 
         std::wstring titleL = ToLower(title);
         std::wstring clsL = ToLower(cls);
+
+        // Jika window berasal dari proses trusted publisher -> whitelist overlay tsb
+        if (IsOwnerProcessTrusted(hwnd)) {
+            return false; // skip semua pengecekan blacklist (overlay legit)
+        }
 
         for (const auto& t : GetBlacklistedWindowTitles()) {
             if (!t.empty() && titleL.find(t) != std::wstring::npos) {

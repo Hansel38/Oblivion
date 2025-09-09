@@ -15,8 +15,12 @@ namespace PublisherWhitelist {
     static std::vector<std::wstring> g_trusted;
 
     void AddTrusted(const std::wstring& publisherNameLower) {
-        g_trusted.push_back(publisherNameLower);
+        std::wstring low = publisherNameLower;
+        std::transform(low.begin(), low.end(), low.begin(), ::towlower);
+        g_trusted.push_back(low);
     }
+
+    void Clear() { g_trusted.clear(); }
 
     const std::vector<std::wstring>& GetTrusted() { return g_trusted; }
 
@@ -91,11 +95,7 @@ namespace PublisherWhitelist {
         std::wstring cn;
         if (!GetFilePublisherCN(filePath, cn)) return false;
         auto cnLower = ToLowerW(cn);
-        const auto& list = GetTrusted();
-        for (const auto& t : list) {
-            if (cnLower == t) return true;
-        }
-        return false;
+        for (const auto& t : g_trusted) if (cnLower == t) return true; return false;
     }
 }
 }

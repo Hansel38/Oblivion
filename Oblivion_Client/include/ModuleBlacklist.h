@@ -7,4 +7,6 @@ namespace OblivionEye {
     const std::vector<std::wstring>& GetBlacklistedModuleNames();
     // Tambah nama modul ke blacklist (lowercase, unik)
     void AddBlacklistedModuleName(const std::wstring& name);
+    // Hapus semua modul dari blacklist
+    void ClearBlacklistedModuleNames();
 }

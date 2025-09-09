@@ -32,4 +32,8 @@ namespace OblivionEye {
         if (std::find(g_blacklisted.begin(), g_blacklisted.end(), low) == g_blacklisted.end())
             g_blacklisted.push_back(low);
     }
+
+    void ClearBlacklistedProcessNames() {
+        g_blacklisted.clear();
+    }
 }

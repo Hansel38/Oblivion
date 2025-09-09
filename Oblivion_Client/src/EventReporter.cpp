@@ -1,6 +1,7 @@
 #include "../pch.h"
 #include "../include/EventReporter.h"
 #include "../include/PipeClient.h"
+#include "../include/RuntimeStats.h"
 #include <string>
 
 namespace OblivionEye {
@@ -20,11 +21,14 @@ namespace EventReporter {
     }
 
     void SendDetection(const std::wstring& feature, const std::wstring& detail) {
+        RuntimeStats::Instance().IncDetection();
         std::string msg = "DETECTION|" + WToUtf8(feature) + "|" + WToUtf8(detail);
         SendRaw(msg);
     }
 
     void SendInfo(const std::wstring& tag, const std::wstring& detail) {
+        RuntimeStats::Instance().IncInfo();
+        if (tag == L"Heartbeat") RuntimeStats::Instance().IncHeartbeat();
         std::string msg = "INFO|" + WToUtf8(tag) + "|" + WToUtf8(detail);
         SendRaw(msg);
     }

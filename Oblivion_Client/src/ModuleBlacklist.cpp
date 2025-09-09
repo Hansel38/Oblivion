@@ -25,4 +25,6 @@ namespace OblivionEye {
         if (std::find(g_modules.begin(), g_modules.end(), low) == g_modules.end())
             g_modules.push_back(low);
     }
+
+    void ClearBlacklistedModuleNames() { g_modules.clear(); }
 }

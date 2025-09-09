@@ -7,4 +7,6 @@ namespace OblivionEye {
     const std::vector<std::wstring>& GetBlacklistedProcessNames();
     // Tambah nama proses ke blacklist (akan disimpan dalam lowercase)
     void AddBlacklistedProcessName(const std::wstring& name);
+    // Bersihkan seluruh daftar (digunakan saat load policy)
+    void ClearBlacklistedProcessNames();
 }

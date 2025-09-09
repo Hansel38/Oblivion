@@ -10,4 +10,8 @@ namespace OblivionEye {
     // Tambahkan item baru secara dinamis (akan disimpan dalam lowercase)
     void AddBlacklistedWindowTitle(const std::wstring& titleSubstr);
     void AddBlacklistedWindowClass(const std::wstring& classSubstr);
+
+    // Bersihkan daftar blacklist
+    void ClearOverlayTitleBlacklist();
+    void ClearOverlayClassBlacklist();
 }

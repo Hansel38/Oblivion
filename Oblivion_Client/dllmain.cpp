@@ -21,6 +21,12 @@
 #include "include/HandleProtection.h"
 #include "include/PublisherWhitelist.h"
 #include "include/PipeCommandClient.h"
+#include "include/PrologHookChecker.h"
+#include "include/NtdllIntegrity.h"
+#include "include/Kernel32Integrity.h"
+#include "include/User32Integrity.h"
+#include "include/Gdi32Integrity.h"
+#include "include/RuntimeStats.h"
 
 // fungsi export dari stud_pe
 extern "C" __declspec(dllexport) void OblivionEye_Entry() {}
@@ -36,6 +42,7 @@ BOOL APIENTRY DllMain( HMODULE hModule,
         DisableThreadLibraryCalls(hModule);
         // Terapkan proteksi handle sebelum modul lain start
         OblivionEye::HandleProtection::Apply();
+        OblivionEye::RuntimeStats::Instance().SetStartTick();
 
         // Seed publisher whitelist (contoh). TODO: sesuaikan publisher resmi Anda
         // OblivionEye::PublisherWhitelist::AddTrusted(L"microsoft corporation");
@@ -50,14 +57,7 @@ BOOL APIENTRY DllMain( HMODULE hModule,
         OblivionEye::PipeCommandClient::Instance().Start(L"\\\\.\\pipe\\OblivionEyeCmd");
 
         // Tambahkan path file kritikal untuk verifikasi signature (contoh)
-        // TODO: sesuaikan path aktual RRO.exe dan file .dll penting lainnya
         // OblivionEye::DigitalSignatureScanner::Instance().AddCriticalPath(L"C:\\Game\\RRO.exe");
-
-        // Inisialisasi TCP client (contoh: 127.0.0.1:60123). Opsional hingga server siap.
-        // OblivionEye::TcpClient::Instance().Start(L"127.0.0.1", 60123);
-
-        // Kirim HWID awal via pipe (opsional)
-        // OblivionEye::PipeClient::Instance().Send(std::string("HWID:") + std::string(OblivionEye::GenerateHWID().begin(), OblivionEye::GenerateHWID().end()));
 
         OblivionEye::ProcessWatcher::Instance().Start();
         OblivionEye::Heartbeat::Instance().Start(10000); // 10 detik
@@ -71,17 +71,25 @@ BOOL APIENTRY DllMain( HMODULE hModule,
         OblivionEye::SignatureScanner::Instance().Start(20000); // 20 detik
         OblivionEye::HijackedThreadDetector::Instance().Start(7000); // 7 detik
         OblivionEye::IATHookChecker::Instance().Start(30000); // 30 detik
+        OblivionEye::PrologHookChecker::Instance().Start(45000); // 45 detik (lambat, berat)
+        OblivionEye::NtdllIntegrity::Instance().Start(60000); // 60 detik (1 menit)
+        OblivionEye::Kernel32Integrity::Instance().Start(60000); // 60 detik (1 menit)
+        OblivionEye::User32Integrity::Instance().Start(90000); // 90 detik (1.5 menit)
+        OblivionEye::Gdi32Integrity::Instance().Start(90000); // 90 detik (1.5 menit)
         OblivionEye::TestModeSpoofChecker::Instance().Start(30000); // 30 detik
         break;
     case DLL_THREAD_ATTACH:
-        // Daftarkan thread baru agar diproteksi
         OblivionEye::RegisterThreadId(GetCurrentThreadId());
         break;
     case DLL_THREAD_DETACH:
-        // Lepas thread dari proteksi
         OblivionEye::UnregisterThreadId(GetCurrentThreadId());
         break;
     case DLL_PROCESS_DETACH:
+        OblivionEye::Gdi32Integrity::Instance().Stop();
+        OblivionEye::User32Integrity::Instance().Stop();
+        OblivionEye::Kernel32Integrity::Instance().Stop();
+        OblivionEye::NtdllIntegrity::Instance().Stop();
+        OblivionEye::PrologHookChecker::Instance().Stop();
         OblivionEye::PipeCommandClient::Instance().Stop();
         OblivionEye::TcpClient::Instance().Stop();
         OblivionEye::TestModeSpoofChecker::Instance().Stop();

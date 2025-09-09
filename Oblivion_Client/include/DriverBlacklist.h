@@ -7,4 +7,6 @@ namespace OblivionEye {
     const std::vector<std::wstring>& GetBlacklistedDriverNames();
     // Tambahkan nama driver ke blacklist (lowercase, unik)
     void AddBlacklistedDriverName(const std::wstring& name);
+    // Hapus semua nama driver dari blacklist
+    void ClearBlacklistedDriverNames();
 }

@@ -12,5 +12,7 @@ namespace OblivionEye {
         bool GetFilePublisherCN(const std::wstring& filePath, std::wstring& outPublisherCN);
         // Return true jika file signed dan subject ada dalam whitelist.
         bool IsFileSignedByTrusted(const std::wstring& filePath);
+        // Optional opsional lanjutan:
+        void Clear();
     }
 }

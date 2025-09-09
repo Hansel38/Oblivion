@@ -1,0 +1,115 @@
+#include "../pch.h"
+#include "../include/NtdllIntegrity.h"
+#include "../include/Logger.h"
+#include "../include/EventReporter.h"
+#include "../include/Utils.h"
+#include "../include/IntegrityChunkWhitelist.h"
+#include <windows.h>
+#include <thread>
+#include <chrono>
+#include <string>
+#include <sstream>
+#include <iomanip>
+
+namespace OblivionEye {
+
+    static unsigned long long Fnv1a64(const unsigned char* data, size_t len) {
+        const unsigned long long FNV_OFFSET = 1469598103934665603ULL;
+        const unsigned long long FNV_PRIME = 1099511628211ULL;
+        unsigned long long h = FNV_OFFSET;
+        for (size_t i = 0; i < len; ++i) { h ^= data[i]; h *= FNV_PRIME; }
+        return h;
+    }
+
+    static std::wstring Hex64(uint64_t v) {
+        std::wstringstream ss; ss << std::hex << std::setw(8) << std::setfill(L'0') << v; return ss.str();
+    }
+
+    static bool GetNtdllTextRegion(unsigned char*& base, size_t& size) {
+        HMODULE hNtdll = GetModuleHandleW(L"ntdll.dll");
+        if (!hNtdll) return false;
+        auto dos = reinterpret_cast<PIMAGE_DOS_HEADER>(hNtdll);
+        if (!dos || dos->e_magic != IMAGE_DOS_SIGNATURE) return false;
+        auto nt = reinterpret_cast<PIMAGE_NT_HEADERS>((unsigned char*)hNtdll + dos->e_lfanew);
+        if (!nt || nt->Signature != IMAGE_NT_SIGNATURE) return false;
+        auto sec = IMAGE_FIRST_SECTION(nt);
+        for (unsigned i = 0; i < nt->FileHeader.NumberOfSections; ++i) {
+            const char* name = reinterpret_cast<const char*>(sec[i].Name);
+            if (strncmp(name, ".text", 5) == 0) {
+                base = (unsigned char*)hNtdll + sec[i].VirtualAddress;
+                size = sec[i].Misc.VirtualSize ? sec[i].Misc.VirtualSize : sec[i].SizeOfRawData;
+                return true;
+            }
+        }
+        return false;
+    }
+
+    NtdllIntegrity& NtdllIntegrity::Instance() { static NtdllIntegrity s; return s; }
+
+    bool NtdllIntegrity::CaptureSubsectionHashes() {
+        unsigned char* base = nullptr; size_t size = 0;
+        if (!GetNtdllTextRegion(base, size)) return false;
+        const size_t chunk = 4096; // 4KB
+        size_t chunks = (size + chunk - 1) / chunk;
+        m_chunkHashes.resize(chunks);
+        for (size_t i = 0; i < chunks; ++i) {
+            size_t off = i * chunk;
+            size_t len = (off + chunk <= size) ? chunk : (size - off);
+            m_chunkHashes[i] = Fnv1a64(base + off, len);
+        }
+        return true;
+    }
+
+    void NtdllIntegrity::CaptureBaseline() {
+        if (m_baselineCaptured) return;
+        unsigned char* base = nullptr; size_t size = 0;
+        if (!GetNtdllTextRegion(base, size)) return;
+        m_baselineHash = Fnv1a64(base, size);
+        CaptureSubsectionHashes();
+        m_baselineCaptured = true;
+        Log(L"NtdllIntegrity baseline captured (full + chunk hashes)");
+    }
+
+    bool NtdllIntegrity::Check() {
+        unsigned char* base = nullptr; size_t size = 0;
+        if (!GetNtdllTextRegion(base, size)) return false;
+        auto current = Fnv1a64(base, size);
+        if (m_baselineCaptured && current != m_baselineHash) {
+            // Delta: identifikasi chunk mana berubah
+            const size_t chunk = 4096;
+            size_t chunks = (size + chunk - 1) / chunk;
+            std::wstring deltaInfo;
+            for (size_t i = 0; i < chunks && i < m_chunkHashes.size(); ++i) {
+                size_t off = i * chunk;
+                size_t len = (off + chunk <= size) ? chunk : (size - off);
+                unsigned long long h = Fnv1a64(base + off, len);
+                if (h != m_chunkHashes[i]) {
+                    if (IntegrityChunkWhitelist::IsWhitelisted(L"ntdll.dll", i)) continue; // skip whitelisted chunk
+                    deltaInfo += L"[" + std::to_wstring(i) + L"@0x" + Hex64((uint64_t)off) + L"]";
+                }
+            }
+            if (deltaInfo.empty()) return false; // only whitelisted diffs
+            EventReporter::SendDetection(L"NtdllIntegrity", L"ntdll .text modified chunks:" + deltaInfo);
+            ShowDetectionAndExit(L"ntdll integrity mismatch " + deltaInfo);
+            return true;
+        }
+        return false;
+    }
+
+    void NtdllIntegrity::Start(unsigned intervalMs) {
+        if (m_running.exchange(true)) return;
+        std::thread([this, intervalMs]() { Loop(intervalMs); }).detach();
+    }
+
+    void NtdllIntegrity::Stop() { m_running = false; }
+
+    void NtdllIntegrity::Loop(unsigned intervalMs) {
+        Log(L"NtdllIntegrity start");
+        CaptureBaseline();
+        while (m_running) {
+            if (Check()) return;
+            std::this_thread::sleep_for(std::chrono::milliseconds(intervalMs));
+        }
+        Log(L"NtdllIntegrity stop");
+    }
+}

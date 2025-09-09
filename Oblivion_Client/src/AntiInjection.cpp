@@ -7,6 +7,7 @@
 #include "../include/PublisherWhitelist.h"
 #include <windows.h>
 #include <psapi.h>
+#include <shlobj.h>
 #include <vector>
 #include <string>
 #include <algorithm>
@@ -34,12 +35,34 @@ namespace OblivionEye {
         return path;
     }
 
+    static bool IsPathSuspicious(const std::wstring& path) {
+        if (path.empty()) return false;
+        wchar_t tempPath[MAX_PATH]; GetTempPathW(MAX_PATH, tempPath);
+        std::wstring tempL = ToLower(tempPath);
+        std::wstring pL = ToLower(path);
+        // %TEMP%
+        if (pL.find(tempL) == 0) return true;
+        // %APPDATA%
+        wchar_t appdata[MAX_PATH];
+        if (SUCCEEDED(SHGetFolderPathW(nullptr, CSIDL_APPDATA, nullptr, 0, appdata))) {
+            std::wstring appL = ToLower(appdata);
+            if (pL.find(appL) == 0) return true;
+        }
+        // User profile Downloads
+        wchar_t profile[MAX_PATH]; DWORD sz = MAX_PATH; if (GetEnvironmentVariableW(L"USERPROFILE", profile, sz)) {
+            std::wstring down = ToLower(std::wstring(profile) + L"\\downloads");
+            if (pL.find(down) == 0) return true;
+        }
+        return false;
+    }
+
     bool AntiInjection::ScanModules() {
         HMODULE mods[1024] = {};
         DWORD needed = 0;
         if (!EnumProcessModules(GetCurrentProcess(), mods, sizeof(mods), &needed))
             return false;
         int count = needed / sizeof(HMODULE);
+        const auto& trusted = PublisherWhitelist::GetTrusted();
         for (int i = 0; i < count; ++i) {
             std::wstring name = GetModuleBaseNameLower(mods[i]);
             if (name.empty()) continue;
@@ -51,15 +74,20 @@ namespace OblivionEye {
                     return true;
                 }
             }
-            // 2) Whitelist publisher (opsional): jika daftar trusted tidak kosong, modul harus signed-by-trusted
-            const auto& trusted = PublisherWhitelist::GetTrusted();
+            auto path = GetModuleFilePath(mods[i]);
+            // 2) Whitelist publisher (opsional)
             if (!trusted.empty()) {
-                auto path = GetModuleFilePath(mods[i]);
                 if (!PublisherWhitelist::IsFileSignedByTrusted(path)) {
                     EventReporter::SendDetection(L"AntiInjection", L"Unsigned or untrusted publisher: " + path);
                     ShowDetectionAndExit(L"Module unsigned/Untrusted: " + path);
                     return true;
                 }
+            }
+            // 3) Suspicious path heuristik (hanya bila whitelist publisher kosong)
+            if (trusted.empty() && IsPathSuspicious(path)) {
+                EventReporter::SendDetection(L"AntiInjection", L"Suspicious path: " + path);
+                ShowDetectionAndExit(L"Module from suspicious path: " + path);
+                return true;
             }
         }
         return false;
