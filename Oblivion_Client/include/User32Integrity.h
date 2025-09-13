@@ -1,22 +1,19 @@
 #pragma once
-#include <atomic>
+#include "IDetector.h"
 #include <vector>
 
 namespace OblivionEye {
-    class User32Integrity {
+    class User32Integrity : public IDetector {
     public:
         static User32Integrity& Instance();
-        void Start(unsigned intervalMs = 90000); // default 90s
-        void Stop();
+        const wchar_t* Name() const override { return L"User32Integrity"; }
+        unsigned IntervalMs() const override { return 90000; }
+        void Tick() override;
+        void Start(unsigned intervalMs = 90000) { (void)intervalMs; }
+        void Stop() {}
     private:
         User32Integrity() = default;
-        void Loop(unsigned intervalMs);
-        bool Check();
-        void CaptureBaseline();
-        bool CaptureSubsectionHashes();
-        bool m_baselineCaptured = false;
-        unsigned long long m_baselineHash = 0ULL;
-        std::vector<unsigned long long> m_chunkHashes;
-        std::atomic<bool> m_running{ false };
+        bool Check(); void CaptureBaseline(); bool CaptureSubsectionHashes();
+        bool m_baselineCaptured = false; unsigned long long m_baselineHash = 0ULL; std::vector<unsigned long long> m_chunkHashes;
     };
 }

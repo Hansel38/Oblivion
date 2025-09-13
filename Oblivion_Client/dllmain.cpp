@@ -27,57 +27,71 @@
 #include "include/User32Integrity.h"
 #include "include/Gdi32Integrity.h"
 #include "include/RuntimeStats.h"
+#include "include/DetectorScheduler.h"
+#include "include/PolicyManager.h"
+#include "include/Logger.h"
+#include <mutex>
 
-// fungsi export dari stud_pe
 extern "C" __declspec(dllexport) void OblivionEye_Entry() {}
 
-BOOL APIENTRY DllMain( HMODULE hModule,
-                       DWORD  ul_reason_for_call,
-                       LPVOID lpReserved
-                     )
-{
-    switch (ul_reason_for_call)
-    {
-    case DLL_PROCESS_ATTACH:
+namespace OblivionEye { static void RegisterTickDetectorsOnce(); }
+
+namespace OblivionEye {
+    static std::once_flag g_registerOnce;
+    static void RegisterTickDetectorsOnce() {
+        std::call_once(g_registerOnce, [](){
+            auto& sched = DetectorScheduler::Instance();
+            sched.Add(&ProcessWatcher::Instance());
+            sched.Add(&AntiTestMode::Instance());
+            sched.Add(&AntiInjection::Instance());
+            sched.Add(&DigitalSignatureScanner::Instance());
+            sched.Add(&OverlayScanner::Instance());
+            sched.Add(&AntiDebug::Instance());
+            sched.Add(&AntiSuspend::Instance());
+            sched.Add(&Heartbeat::Instance());
+            sched.Add(&SignatureScanner::Instance());
+            sched.Add(&HijackedThreadDetector::Instance());
+            sched.Add(&IATHookChecker::Instance());
+            sched.Add(&PrologHookChecker::Instance());
+            sched.Add(&NtdllIntegrity::Instance());
+            sched.Add(&Kernel32Integrity::Instance());
+            sched.Add(&User32Integrity::Instance());
+            sched.Add(&Gdi32Integrity::Instance());
+            sched.Add(&TestModeSpoofChecker::Instance());
+            sched.Start();
+            Log(L"Detector registration completed (once)");
+        });
+    }
+}
+
+static void LoadPolicySafe() {
+    // Simplify: avoid mixed SEH/C++ to satisfy compiler (/EHsc)
+    bool ok = false;
+    try {
+        ok = OblivionEye::PolicyManager::LoadPolicy(L"policy.txt");
+    } catch (...) {
+        ok = false;
+    }
+    if (!ok) {
+        OblivionEye::Log(L"Policy: load failed or exception; embedded fallback in use");
+    } else {
+        OblivionEye::Log(L"Policy: loaded successfully");
+    }
+}
+
+BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID lpReserved) {
+    switch (reason) {
+    case DLL_PROCESS_ATTACH: {
         DisableThreadLibraryCalls(hModule);
-        // Terapkan proteksi handle sebelum modul lain start
         OblivionEye::HandleProtection::Apply();
         OblivionEye::RuntimeStats::Instance().SetStartTick();
-
-        // Seed publisher whitelist (contoh). TODO: sesuaikan publisher resmi Anda
-        // OblivionEye::PublisherWhitelist::AddTrusted(L"microsoft corporation");
-        // OblivionEye::PublisherWhitelist::AddTrusted(L"gravity co., ltd.");
-
-        // Daftarkan main thread agar diproteksi AntiSuspend
         OblivionEye::RegisterThreadId(GetCurrentThreadId());
-
-        // Start PipeClient untuk komunikasi ke server (Named Pipe)
         OblivionEye::PipeClient::Instance().Start(L"\\\\.\\pipe\\OblivionEye");
-        // Start PipeCommandClient untuk menerima perintah dari server
         OblivionEye::PipeCommandClient::Instance().Start(L"\\\\.\\pipe\\OblivionEyeCmd");
-
-        // Tambahkan path file kritikal untuk verifikasi signature (contoh)
-        // OblivionEye::DigitalSignatureScanner::Instance().AddCriticalPath(L"C:\\Game\\RRO.exe");
-
+        LoadPolicySafe();
         OblivionEye::ProcessWatcher::Instance().Start();
-        OblivionEye::Heartbeat::Instance().Start(10000); // 10 detik
-        OblivionEye::OverlayScanner::Instance().Start(2000); // 2 detik
-        OblivionEye::DriverScanner::Instance().Start(10000); // 10 detik, ringan
-        OblivionEye::AntiDebug::Instance().Start(3000); // 3 detik
-        OblivionEye::AntiSuspend::Instance().Start(2000); // 2 detik
-        OblivionEye::AntiInjection::Instance().Start(5000); // 5 detik
-        OblivionEye::DigitalSignatureScanner::Instance().Start(15000); // 15 detik
-        OblivionEye::AntiTestMode::Instance().Start(15000); // 15 detik
-        OblivionEye::SignatureScanner::Instance().Start(20000); // 20 detik
-        OblivionEye::HijackedThreadDetector::Instance().Start(7000); // 7 detik
-        OblivionEye::IATHookChecker::Instance().Start(30000); // 30 detik
-        OblivionEye::PrologHookChecker::Instance().Start(45000); // 45 detik (lambat, berat)
-        OblivionEye::NtdllIntegrity::Instance().Start(60000); // 60 detik (1 menit)
-        OblivionEye::Kernel32Integrity::Instance().Start(60000); // 60 detik (1 menit)
-        OblivionEye::User32Integrity::Instance().Start(90000); // 90 detik (1.5 menit)
-        OblivionEye::Gdi32Integrity::Instance().Start(90000); // 90 detik (1.5 menit)
-        OblivionEye::TestModeSpoofChecker::Instance().Start(30000); // 30 detik
-        break;
+        OblivionEye::RegisterTickDetectorsOnce();
+        break; }
     case DLL_THREAD_ATTACH:
         OblivionEye::RegisterThreadId(GetCurrentThreadId());
         break;
@@ -85,27 +99,10 @@ BOOL APIENTRY DllMain( HMODULE hModule,
         OblivionEye::UnregisterThreadId(GetCurrentThreadId());
         break;
     case DLL_PROCESS_DETACH:
-        OblivionEye::Gdi32Integrity::Instance().Stop();
-        OblivionEye::User32Integrity::Instance().Stop();
-        OblivionEye::Kernel32Integrity::Instance().Stop();
-        OblivionEye::NtdllIntegrity::Instance().Stop();
-        OblivionEye::PrologHookChecker::Instance().Stop();
+        OblivionEye::DetectorScheduler::Instance().Stop();
         OblivionEye::PipeCommandClient::Instance().Stop();
         OblivionEye::TcpClient::Instance().Stop();
-        OblivionEye::TestModeSpoofChecker::Instance().Stop();
-        OblivionEye::IATHookChecker::Instance().Stop();
-        OblivionEye::HijackedThreadDetector::Instance().Stop();
         OblivionEye::PipeClient::Instance().Stop();
-        OblivionEye::SignatureScanner::Instance().Stop();
-        OblivionEye::AntiTestMode::Instance().Stop();
-        OblivionEye::DigitalSignatureScanner::Instance().Stop();
-        OblivionEye::AntiInjection::Instance().Stop();
-        OblivionEye::AntiSuspend::Instance().Stop();
-        OblivionEye::AntiDebug::Instance().Stop();
-        OblivionEye::DriverScanner::Instance().Stop();
-        OblivionEye::OverlayScanner::Instance().Stop();
-        OblivionEye::Heartbeat::Instance().Stop();
-        OblivionEye::ProcessWatcher::Instance().Stop();
         break;
     }
     return TRUE;

@@ -1,17 +1,18 @@
 #pragma once
-#include <atomic>
+#include "IDetector.h"
 
 namespace OblivionEye {
-    class IATHookChecker {
+    class IATHookChecker : public IDetector {
     public:
         static IATHookChecker& Instance();
-        void Start(unsigned intervalMs = 30000);
-        void Stop();
+        const wchar_t* Name() const override { return L"IATHookChecker"; }
+        unsigned IntervalMs() const override { return 30000; }
+        void Tick() override;
+        void Start(unsigned intervalMs = 30000) { (void)intervalMs; }
+        void Stop() {}
     private:
         IATHookChecker() = default;
-        void Loop(unsigned intervalMs);
         bool ScanIAT();
         bool ScanModuleIAT(HMODULE hMod);
-        std::atomic<bool> m_running{ false };
     };
 }

@@ -1,16 +1,17 @@
 #pragma once
-#include <atomic>
+#include "IDetector.h"
 
 namespace OblivionEye {
-    class TestModeSpoofChecker {
+    class TestModeSpoofChecker : public IDetector {
     public:
         static TestModeSpoofChecker& Instance();
-        void Start(unsigned intervalMs = 30000);
-        void Stop();
+        const wchar_t* Name() const override { return L"TestModeSpoofChecker"; }
+        unsigned IntervalMs() const override { return 30000; }
+        void Tick() override;
+        void Start(unsigned intervalMs = 30000) { (void)intervalMs; }
+        void Stop() {}
     private:
         TestModeSpoofChecker() = default;
-        void Loop(unsigned intervalMs);
         bool DetectSpoof();
-        std::atomic<bool> m_running{ false };
     };
 }

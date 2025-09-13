@@ -172,4 +172,11 @@ namespace OblivionEye {
             }
         }
     }
+
+    void ProcessWatcher::Tick() {
+        // Health check: if previously running but thread died unexpectedly (rare), restart.
+        if (!m_running.load()) {
+            Start();
+        }
+    }
 }

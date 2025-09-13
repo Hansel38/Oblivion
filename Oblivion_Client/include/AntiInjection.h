@@ -1,16 +1,20 @@
 #pragma once
 #include <atomic>
+#include "IDetector.h"
 
 namespace OblivionEye {
-    class AntiInjection {
+    class AntiInjection : public IDetector {
     public:
         static AntiInjection& Instance();
-        void Start(unsigned intervalMs = 5000);
-        void Stop();
+        // IDetector impl
+        const wchar_t* Name() const override { return L"AntiInjection"; }
+        unsigned IntervalMs() const override { return 5000; }
+        void Tick() override; // single scan
+        // Legacy API (no-op)
+        void Start(unsigned intervalMs = 5000) { (void)intervalMs; }
+        void Stop() {}
     private:
         AntiInjection() = default;
-        void Loop(unsigned intervalMs);
         bool ScanModules();
-        std::atomic<bool> m_running{ false };
     };
 }

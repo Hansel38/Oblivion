@@ -1,17 +1,18 @@
 #pragma once
-#include <atomic>
+#include "IDetector.h"
 
 namespace OblivionEye {
-    class SignatureScanner {
+    class SignatureScanner : public IDetector {
     public:
         static SignatureScanner& Instance();
-        void Start(unsigned intervalMs = 20000);
-        void Stop();
+        const wchar_t* Name() const override { return L"SignatureScanner"; }
+        unsigned IntervalMs() const override { return 20000; }
+        void Tick() override; // scan memory once
+        void Start(unsigned intervalMs = 20000) { (void)intervalMs; }
+        void Stop() {}
     private:
         SignatureScanner() = default;
-        void Loop(unsigned intervalMs);
         bool ScanMemory();
         bool ScanModule(HMODULE hMod, const wchar_t* modName);
-        std::atomic<bool> m_running{ false };
     };
 }

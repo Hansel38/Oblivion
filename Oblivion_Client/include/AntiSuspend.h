@@ -1,15 +1,16 @@
 #pragma once
-#include <atomic>
+#include "IDetector.h"
 
 namespace OblivionEye {
-    class AntiSuspend {
+    class AntiSuspend : public IDetector {
     public:
         static AntiSuspend& Instance();
-        void Start(unsigned intervalMs = 2000);
-        void Stop();
+        const wchar_t* Name() const override { return L"AntiSuspend"; }
+        unsigned IntervalMs() const override { return 2000; }
+        void Tick() override;
+        void Start(unsigned intervalMs = 2000) { (void)intervalMs; }
+        void Stop() {}
     private:
         AntiSuspend() = default;
-        void Loop(unsigned intervalMs);
-        std::atomic<bool> m_running{ false };
     };
 }

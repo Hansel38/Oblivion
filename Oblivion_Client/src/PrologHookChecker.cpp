@@ -5,7 +5,6 @@
 #include "../include/Utils.h"
 #include <windows.h>
 #include <psapi.h>
-#include <thread>
 #include <vector>
 #include <string>
 #include <algorithm>
@@ -16,36 +15,21 @@
 namespace OblivionEye {
 
     static unsigned char* ResolveFuncPtr(const std::wstring& moduleName, const std::string& funcName) {
-        HMODULE hMod = GetModuleHandleW(moduleName.c_str());
-        if (!hMod) return nullptr;
-        FARPROC fp = GetProcAddress(hMod, funcName.c_str());
-        if (!fp) return nullptr;
-        return reinterpret_cast<unsigned char*>(fp);
+        HMODULE hMod = GetModuleHandleW(moduleName.c_str()); if (!hMod) return nullptr; FARPROC fp = GetProcAddress(hMod, funcName.c_str()); if (!fp) return nullptr; return (unsigned char*)fp;
     }
 
     PrologHookChecker& PrologHookChecker::Instance() { static PrologHookChecker s; return s; }
 
-    std::vector<PrologTarget> PrologHookChecker::GetTargets() {
-        std::lock_guard<std::mutex> lk(m_mtx);
-        return m_targets; // copy out
-    }
+    std::vector<PrologTarget> PrologHookChecker::GetTargets() { std::lock_guard<std::mutex> lk(m_mtx); return m_targets; }
 
     void PrologHookChecker::AddTarget(const std::wstring& moduleName, const std::string& funcName, size_t minBytes) {
-        std::lock_guard<std::mutex> lk(m_mtx);
-        PrologTarget t{ ToLower(moduleName), funcName, minBytes };
-        m_targets.push_back(t);
-        // Tambah baseline slot kosong agar Rebaseline dapat mengisi nanti
-        m_baselines.emplace_back();
-    }
+        std::lock_guard<std::mutex> lk(m_mtx); PrologTarget t{ ToLower(moduleName), funcName, minBytes }; m_targets.push_back(t); m_baselines.emplace_back(); }
 
-    void PrologHookChecker::Rebaseline() {
-        CaptureBaselines(true);
-    }
+    void PrologHookChecker::Rebaseline() { CaptureBaselines(true); }
 
     void PrologHookChecker::CaptureBaselines(bool forceAll) {
         std::lock_guard<std::mutex> lk(m_mtx);
         if (!m_baselineCaptured || forceAll) {
-            // Inisialisasi target default jika pertama kali
             if (!m_baselineCaptured) {
                 m_targets = {
                     { L"kernel32.dll", "VirtualProtect", 8 },
@@ -59,17 +43,9 @@ namespace OblivionEye {
                 };
                 m_baselines.clear();
             }
-            if (m_baselines.size() < m_targets.size())
-                m_baselines.resize(m_targets.size());
+            if (m_baselines.size() < m_targets.size()) m_baselines.resize(m_targets.size());
             for (size_t i = 0; i < m_targets.size(); ++i) {
-                auto& tgt = m_targets[i];
-                unsigned char* p = ResolveFuncPtr(tgt.module, tgt.function);
-                if (p) {
-                    m_baselines[i].assign(p, p + tgt.minBytes);
-                } else if (forceAll) {
-                    // Clear baseline if recapture & function not found
-                    m_baselines[i].clear();
-                }
+                auto& tgt = m_targets[i]; unsigned char* p = ResolveFuncPtr(tgt.module, tgt.function); if (p) { m_baselines[i].assign(p, p + tgt.minBytes); } else if (forceAll) { m_baselines[i].clear(); }
             }
             m_baselineCaptured = true;
             Log(L"PrologHookChecker baseline captured (targets=" + std::to_wstring(m_targets.size()) + L")");
@@ -79,21 +55,12 @@ namespace OblivionEye {
     bool PrologHookChecker::CheckFunction(size_t index) {
         std::lock_guard<std::mutex> lk(m_mtx);
         if (index >= m_targets.size()) return true;
-        auto& tgt = m_targets[index];
-        unsigned char* p = ResolveFuncPtr(tgt.module, tgt.function);
-        if (!p) return true; // modul belum diload
-        // Pattern hook umum
-        if (p[0] == 0xE9 || p[0] == 0xE8 || p[0] == 0xC2 || p[0] == 0xC3 || p[0] == 0xCB || p[0] == 0xCA)
-            return false;
-        if (p[0] == 0xFF && (p[1] == 0x25 || p[1] == 0x15))
-            return false;
-        if (p[0] == 0x68 && p[5] == 0xC3)
-            return false;
+        auto& tgt = m_targets[index]; unsigned char* p = ResolveFuncPtr(tgt.module, tgt.function); if (!p) return true;
+        if (p[0] == 0xE9 || p[0] == 0xE8 || p[0] == 0xC2 || p[0] == 0xC3 || p[0] == 0xCB || p[0] == 0xCA) return false;
+        if (p[0] == 0xFF && (p[1] == 0x25 || p[1] == 0x15)) return false;
+        if (p[0] == 0x68 && p[5] == 0xC3) return false;
         if (index < m_baselines.size() && !m_baselines[index].empty()) {
-            auto& base = m_baselines[index];
-            for (size_t i = 0; i < base.size(); ++i) {
-                if (p[i] != base[i]) return false;
-            }
+            auto& base = m_baselines[index]; for (size_t i = 0; i < base.size(); ++i) { if (p[i] != base[i]) return false; }
         }
         return true;
     }
@@ -101,31 +68,14 @@ namespace OblivionEye {
     bool PrologHookChecker::Scan() {
         for (size_t i = 0; i < m_targets.size(); ++i) {
             if (!CheckFunction(i)) {
-                auto& t = m_targets[i];
-                std::wstring msg = L"Inline hook terdeteksi: ";
-                msg += t.module; msg += L"!"; msg += std::wstring(t.function.begin(), t.function.end());
-                EventReporter::SendDetection(L"PrologHookChecker", msg);
-                ShowDetectionAndExit(msg);
-                return true;
+                auto& t = m_targets[i]; std::wstring msg = L"Inline hook terdeteksi: "; msg += t.module + L"!" + std::wstring(t.function.begin(), t.function.end());
+                EventReporter::SendDetection(L"PrologHookChecker", msg); ShowDetectionAndExit(msg); return true;
             }
         }
         return false;
     }
 
-    void PrologHookChecker::Start(unsigned intervalMs) {
-        if (m_running.exchange(true)) return;
-        std::thread([this, intervalMs]() { Loop(intervalMs); }).detach();
-    }
-
-    void PrologHookChecker::Stop() { m_running = false; }
-
-    void PrologHookChecker::Loop(unsigned intervalMs) {
-        Log(L"PrologHookChecker start");
-        CaptureBaselines();
-        while (m_running) {
-            if (Scan()) return;
-            std::this_thread::sleep_for(std::chrono::milliseconds(intervalMs));
-        }
-        Log(L"PrologHookChecker stop");
+    void PrologHookChecker::Tick() {
+        if (!m_baselineCaptured) CaptureBaselines(false); else Scan();
     }
 }

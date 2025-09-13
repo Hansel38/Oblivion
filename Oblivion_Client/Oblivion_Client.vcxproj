@@ -143,10 +143,12 @@
     <ClInclude Include="include\AntiSuspend.h" />
     <ClInclude Include="include\AntiTestMode.h" />
     <ClInclude Include="include\Blacklist.h" />
+    <ClInclude Include="include\DetectorScheduler.h" />
     <ClInclude Include="include\DigitalSignature.h" />
     <ClInclude Include="include\DigitalSignatureScanner.h" />
     <ClInclude Include="include\DriverBlacklist.h" />
     <ClInclude Include="include\DriverScanner.h" />
+    <ClInclude Include="include\EmbeddedPolicy.h" />
     <ClInclude Include="include\EventReporter.h" />
     <ClInclude Include="include\FileIntegrity.h" />
     <ClInclude Include="include\Gdi32Integrity.h" />
@@ -155,6 +157,7 @@
     <ClInclude Include="include\HijackedThreadDetector.h" />
     <ClInclude Include="include\HWID.h" />
     <ClInclude Include="include\IATHookChecker.h" />
+    <ClInclude Include="include\IDetector.h" />
     <ClInclude Include="include\IntegrityChunkWhitelist.h" />
     <ClInclude Include="include\Kernel32Integrity.h" />
     <ClInclude Include="include\Logger.h" />
@@ -192,6 +195,7 @@
     <ClCompile Include="src\AntiSuspend.cpp" />
     <ClCompile Include="src\AntiTestMode.cpp" />
     <ClCompile Include="src\Blacklist.cpp" />
+    <ClCompile Include="src\DetectorScheduler.cpp" />
     <ClCompile Include="src\DigitalSignature.cpp" />
     <ClCompile Include="src\DigitalSignatureScanner.cpp" />
     <ClCompile Include="src\DriverBlacklist.cpp" />

@@ -138,6 +138,15 @@
     <ClInclude Include="include\IntegrityChunkWhitelist.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="include\IDetector.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="include\DetectorScheduler.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="include\EmbeddedPolicy.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="dllmain.cpp">
@@ -261,6 +270,9 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="src\IntegrityChunkWhitelist.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="src\DetectorScheduler.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>

@@ -1,19 +1,21 @@
 #pragma once
-#include <atomic>
+#include "IDetector.h"
 
 namespace OblivionEye {
-    class Heartbeat {
+    class Heartbeat : public IDetector {
     public:
         static Heartbeat& Instance();
-        void Start(unsigned intervalMs = 10000); // default 10 detik
-        void Stop();
+        const wchar_t* Name() const override { return L"Heartbeat"; }
+        unsigned IntervalMs() const override { return 10000; }
+        void Tick() override; // single beat
+        void Start(unsigned intervalMs = 10000) { (void)intervalMs; }
+        void Stop() {}
         void TriggerNow();
-        // Set adaptif: enable/disable dynamic interval (default off)
         void EnableAdaptive(bool enable);
     private:
         Heartbeat() = default;
-        void Loop(unsigned intervalMs);
-        std::atomic<bool> m_running{ false };
-        std::atomic<bool> m_adaptive{ false };
+        unsigned m_idleStreak = 0;
+        unsigned m_currentInterval = 10000;
+        bool m_adaptive = false;
     };
 }

@@ -3,11 +3,8 @@
 #include "../include/Logger.h"
 #include "../include/Utils.h"
 #include <windows.h>
-#include <thread>
-#include <chrono>
 
 namespace OblivionEye {
-
     TestModeSpoofChecker& TestModeSpoofChecker::Instance() { static TestModeSpoofChecker s; return s; }
 
     static bool CheckSuspiciousRegKeys() {
@@ -21,22 +18,7 @@ namespace OblivionEye {
         return false;
     }
 
-    void TestModeSpoofChecker::Start(unsigned intervalMs) {
-        if (m_running.exchange(true)) return;
-        std::thread([this, intervalMs]() { Loop(intervalMs); }).detach();
-    }
-
-    void TestModeSpoofChecker::Stop() { m_running = false; }
-
-    void TestModeSpoofChecker::Loop(unsigned intervalMs) {
-        Log(L"TestModeSpoofChecker start");
-        while (m_running) {
-            if (DetectSpoof()) {
-                ShowDetectionAndExit(L"Test Mode spoof terdeteksi");
-                return;
-            }
-            std::this_thread::sleep_for(std::chrono::milliseconds(intervalMs));
-        }
-        Log(L"TestModeSpoofChecker stop");
+    void TestModeSpoofChecker::Tick() {
+        if (DetectSpoof()) ShowDetectionAndExit(L"Test Mode spoof terdeteksi");
     }
 }

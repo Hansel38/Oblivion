@@ -10,8 +10,6 @@
 #include <vector>
 #include <string>
 #include <mutex>
-#include <thread>
-#include <chrono>
 
 namespace OblivionEye {
 
@@ -24,13 +22,6 @@ namespace OblivionEye {
         std::lock_guard<std::mutex> lk(g_paths_mtx);
         g_paths.push_back(path);
     }
-
-    void DigitalSignatureScanner::Start(unsigned intervalMs) {
-        if (m_running.exchange(true)) return;
-        std::thread([this, intervalMs]() { Loop(intervalMs); }).detach();
-    }
-
-    void DigitalSignatureScanner::Stop() { m_running = false; }
 
     bool DigitalSignatureScanner::ScanPaths() {
         std::vector<std::wstring> snapshot;
@@ -66,12 +57,7 @@ namespace OblivionEye {
         return false;
     }
 
-    void DigitalSignatureScanner::Loop(unsigned intervalMs) {
-        Log(L"DigitalSignatureScanner start");
-        while (m_running) {
-            if (ScanPaths()) return; 
-            std::this_thread::sleep_for(std::chrono::milliseconds(intervalMs));
-        }
-        Log(L"DigitalSignatureScanner stop");
+    void DigitalSignatureScanner::Tick() {
+        ScanPaths();
     }
 }

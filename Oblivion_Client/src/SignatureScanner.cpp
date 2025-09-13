@@ -8,8 +8,6 @@
 #include <psapi.h>
 #include <vector>
 #include <string>
-#include <thread>
-#include <chrono>
 
 #pragma comment(lib, "psapi.lib")
 
@@ -64,19 +62,7 @@ namespace OblivionEye {
         return false;
     }
 
-    void SignatureScanner::Start(unsigned intervalMs) {
-        if (m_running.exchange(true)) return;
-        std::thread([this, intervalMs]() { Loop(intervalMs); }).detach();
-    }
-
-    void SignatureScanner::Stop() { m_running = false; }
-
-    void SignatureScanner::Loop(unsigned intervalMs) {
-        Log(L"SignatureScanner start");
-        while (m_running) {
-            if (ScanMemory()) return; 
-            std::this_thread::sleep_for(std::chrono::milliseconds(intervalMs));
-        }
-        Log(L"SignatureScanner stop");
+    void SignatureScanner::Tick() {
+        ScanMemory();
     }
 }

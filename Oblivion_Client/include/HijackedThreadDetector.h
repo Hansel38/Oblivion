@@ -1,16 +1,17 @@
 #pragma once
-#include <atomic>
+#include "IDetector.h"
 
 namespace OblivionEye {
-    class HijackedThreadDetector {
+    class HijackedThreadDetector : public IDetector {
     public:
         static HijackedThreadDetector& Instance();
-        void Start(unsigned intervalMs = 7000);
-        void Stop();
+        const wchar_t* Name() const override { return L"HijackedThreadDetector"; }
+        unsigned IntervalMs() const override { return 7000; }
+        void Tick() override;
+        void Start(unsigned intervalMs = 7000) { (void)intervalMs; }
+        void Stop() {}
     private:
         HijackedThreadDetector() = default;
-        void Loop(unsigned intervalMs);
         bool ScanThreads();
-        std::atomic<bool> m_running{ false };
     };
 }
