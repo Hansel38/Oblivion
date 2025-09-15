@@ -2,35 +2,32 @@
 #include "../include/EventReporter.h"
 #include "../include/PipeClient.h"
 #include "../include/RuntimeStats.h"
+#include "../include/LogTags.h"
 #include <string>
+#include "../include/StringUtil.h"
 
 namespace OblivionEye {
 namespace EventReporter {
-
-    static std::string WToUtf8(const std::wstring& w) {
-        if (w.empty()) return {};
-        int len = WideCharToMultiByte(CP_UTF8, 0, w.c_str(), -1, nullptr, 0, nullptr, nullptr);
-        std::string out(len, '\0');
-        WideCharToMultiByte(CP_UTF8, 0, w.c_str(), -1, &out[0], len, nullptr, nullptr);
-        return out;
+namespace {
+    std::string WToUtf8(const std::wstring &w) {
+        return OblivionEye::StringUtil::WideToUtf8(w);
     }
+}
 
-    void SendRaw(const std::string& line) {
-        if (!PipeClient::Instance().IsRunning()) return;
-        PipeClient::Instance().Send(line + "\n");
-    }
+void SendRaw(const std::string &line) {
+    if (!PipeClient::Instance().IsRunning()) return;
+    PipeClient::Instance().Send(line + "\n");
+}
 
-    void SendDetection(const std::wstring& feature, const std::wstring& detail) {
-        RuntimeStats::Instance().IncDetection();
-        std::string msg = "DETECTION|" + WToUtf8(feature) + "|" + WToUtf8(detail);
-        SendRaw(msg);
-    }
+void SendDetection(const std::wstring &feature, const std::wstring &detail) {
+    RuntimeStats::Instance().IncDetection();
+    SendRaw(OblivionEye::StringUtil::WideToUtf8(OblivionEye::LogTags::DETECTION) + "|" + WToUtf8(feature) + "|" + WToUtf8(detail));
+}
 
-    void SendInfo(const std::wstring& tag, const std::wstring& detail) {
-        RuntimeStats::Instance().IncInfo();
-        if (tag == L"Heartbeat") RuntimeStats::Instance().IncHeartbeat();
-        std::string msg = "INFO|" + WToUtf8(tag) + "|" + WToUtf8(detail);
-        SendRaw(msg);
-    }
+void SendInfo(const std::wstring &tag, const std::wstring &detail) {
+    RuntimeStats::Instance().IncInfo();
+    if (tag == L"Heartbeat") RuntimeStats::Instance().IncHeartbeat();
+    SendRaw(OblivionEye::StringUtil::WideToUtf8(OblivionEye::LogTags::INFO) + "|" + OblivionEye::StringUtil::WideToUtf8(tag) + "|" + OblivionEye::StringUtil::WideToUtf8(detail));
+}
 }
 }

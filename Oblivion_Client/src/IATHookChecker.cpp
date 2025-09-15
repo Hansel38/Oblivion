@@ -3,6 +3,8 @@
 #include "../include/Logger.h"
 #include "../include/EventReporter.h"
 #include "../include/Utils.h"
+#include "../include/DetectionCorrelator.h"
+#include "../include/Config.h"
 #include <windows.h>
 #include <psapi.h>
 
@@ -23,19 +25,19 @@ namespace OblivionEye {
 #ifdef _WIN64
             if(!(oft->u1.Ordinal & IMAGE_ORDINAL_FLAG)){
                 void* target=(void*)ft->u1.Function; HMODULE owner=nullptr; GetModuleHandleEx(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS|GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,(LPCWSTR)target,&owner);
-                if(owner && !IsAddressInsideModule(owner,target)){ EventReporter::SendDetection(L"IATHookChecker", L"IAT hook"); ShowDetectionAndExit(L"IAT hook terdeteksi"); return true; }
+                if(owner && !IsAddressInsideModule(owner,target)){ DetectionCorrelator::Instance().Report(L"IAT", L"IAT hook"); EventReporter::SendDetection(L"IATHookChecker", L"IAT hook"); ShowDetectionAndExit(L"IAT hook terdeteksi"); return true; }
             }
 #else
             if(!(oft->u1.Ordinal & IMAGE_ORDINAL_FLAG32)){
                 void* target=(void*)ft->u1.Function; HMODULE owner=nullptr; GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS|GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,(LPCSTR)target,&owner);
-                if(owner && !IsAddressInsideModule(owner,target)){ EventReporter::SendDetection(L"IATHookChecker", L"IAT hook"); ShowDetectionAndExit(L"IAT hook terdeteksi"); return true; }
+                if(owner && !IsAddressInsideModule(owner,target)){ DetectionCorrelator::Instance().Report(L"IAT", L"IAT hook"); EventReporter::SendDetection(L"IATHookChecker", L"IAT hook"); ShowDetectionAndExit(L"IAT hook terdeteksi"); return true; }
             }
 #endif
         }}
         return false;
     }
 
-    bool IATHookChecker::ScanIAT(){ HMODULE mods[1024]={}; DWORD needed=0; if(!EnumProcessModules(GetCurrentProcess(),mods,sizeof(mods),&needed)) return false; int count=needed/sizeof(HMODULE); for(int i=0;i<count;++i){ if(ScanModuleIAT(mods[i])) return true; } return false; }
+    bool IATHookChecker::ScanIAT(){ HMODULE mods[OblivionEye::Config::MODULE_ENUM_MAX]={}; DWORD needed=0; if(!EnumProcessModules(GetCurrentProcess(),mods,sizeof(mods),&needed)) return false; int count=needed/sizeof(HMODULE); for(int i=0;i<count;++i){ if(ScanModuleIAT(mods[i])) return true; } return false; }
 
     void IATHookChecker::Tick(){ ScanIAT(); }
 }

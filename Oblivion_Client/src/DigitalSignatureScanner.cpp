@@ -12,52 +12,59 @@
 #include <mutex>
 
 namespace OblivionEye {
+namespace {
+    std::mutex g_pathsMtx;
+    std::vector<std::wstring> g_paths; // critical paths to validate
 
-    static std::mutex g_paths_mtx;
-    static std::vector<std::wstring> g_paths;
-
-    DigitalSignatureScanner& DigitalSignatureScanner::Instance() { static DigitalSignatureScanner s; return s; }
-
-    void DigitalSignatureScanner::AddCriticalPath(const std::wstring& path) {
-        std::lock_guard<std::mutex> lk(g_paths_mtx);
-        g_paths.push_back(path);
-    }
-
-    bool DigitalSignatureScanner::ScanPaths() {
-        std::vector<std::wstring> snapshot;
-        {
-            std::lock_guard<std::mutex> lk(g_paths_mtx);
-            snapshot = g_paths;
-        }
-        const auto& trusted = PublisherWhitelist::GetTrusted();
-        for (const auto& p : snapshot) {
-            bool violation = false;
-            if (!trusted.empty()) {
-                // Mode whitelist: file harus signed oleh publisher trusted.
-                auto info = VerifyFileSignatureExtended(p, false); // offline revocation for performance
-                if (!info.trusted) {
-                    violation = true; // tidak valid chain
-                } else {
-                    // publisher harus ada di whitelist
-                    std::wstring lowCN = info.publisherCN; for (auto& ch : lowCN) ch = (wchar_t)towlower(ch);
-                    bool found = false;
-                    for (const auto& t : trusted) { if (lowCN == t) { found = true; break; } }
-                    if (!found) violation = true;
-                }
-            } else {
-                // Mode basic: cukup signed sederhana
-                if (!VerifyFileIsSigned(p)) violation = true;
-            }
-            if (violation) {
-                EventReporter::SendDetection(L"DigitalSignature", p);
-                ShowDetectionAndExit(L"File tidak memenuhi kebijakan signature: " + p);
+    bool IsTrustedPublisherMatch(const std::wstring &publisherLower) {
+        const auto &trusted = PublisherWhitelist::GetTrusted();
+        for (const auto &t : trusted) {
+            if (publisherLower == t)
                 return true;
-            }
         }
         return false;
     }
 
-    void DigitalSignatureScanner::Tick() {
-        ScanPaths();
+    bool ValidatePathAgainstPolicy(const std::wstring &path) {
+        const auto &trusted = PublisherWhitelist::GetTrusted();
+
+        if (!trusted.empty()) {
+            // Whitelist mode: file must be signed and CN in whitelist
+            auto info = VerifyFileSignatureExtended(path, false); // offline revocation for perf
+            if (!info.trusted)
+                return false; // chain invalid
+            auto publisherLower = info.publisherCN;
+            for (auto &ch : publisherLower) ch = static_cast<wchar_t>(towlower(ch));
+            return IsTrustedPublisherMatch(publisherLower);
+        }
+        // Basic mode: just require it to be signed
+        return VerifyFileIsSigned(path);
     }
+}
+
+DigitalSignatureScanner &DigitalSignatureScanner::Instance() { static DigitalSignatureScanner s; return s; }
+
+void DigitalSignatureScanner::AddCriticalPath(const std::wstring &path) {
+    std::lock_guard<std::mutex> lk(g_pathsMtx);
+    g_paths.push_back(path);
+}
+
+bool DigitalSignatureScanner::ScanPaths() {
+    std::vector<std::wstring> snapshot;
+    {
+        std::lock_guard<std::mutex> lk(g_pathsMtx);
+        snapshot = g_paths;
+    }
+
+    for (const auto &p : snapshot) {
+        if (ValidatePathAgainstPolicy(p))
+            continue;
+        EventReporter::SendDetection(L"DigitalSignature", p);
+        ShowDetectionAndExit(L"File tidak memenuhi kebijakan signature: " + p);
+        return true;
+    }
+    return false;
+}
+
+void DigitalSignatureScanner::Tick() { ScanPaths(); }
 }

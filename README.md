@@ -1,9 +1,11 @@
 # Oblivion Eye (Garuda Hack Shield)
 
 ## Ringkasan
+
 Anti-cheat modular user-mode untuk Ragnarok (RRO.exe) ditulis dalam C++17 (VS2022, Win32/x86). Fokus utama: deteksi tool injeksi umum, hook (IAT / inline / prolog), modifikasi memory section kritikal (.text sistem), aktivitas overlay, dan integritas file/signature.
 
 ## Arsitektur Tingkat Tinggi
+
 - DLL Client (Oblivion_Client) diinject / diload ke proses game.
 - Server contoh (Oblivion_Server) menerima log (Named Pipe) dan mengirim perintah kontrol (command pipe).
 - Komunikasi teks sederhana: setiap pesan satu line (terminated `\n`).
@@ -12,8 +14,9 @@ Anti-cheat modular user-mode untuk Ragnarok (RRO.exe) ditulis dalam C++17 (VS202
 - Semua detector (kecuali bootstrap ProcessWatcher WMI thread) berjalan dalam satu `DetectorScheduler` (tick-based) sehingga manajemen interval & profiling terpusat.
 
 ## Fitur Utama
+
 1. Process & Thread Watcher (WMI + fallback snapshot)
-2. HandleProtection (mencegah open handle berbahaya – pendekatan dasar)
+2. HandleProtection (mencegah open handle berbahaya â€“ pendekatan dasar)
 3. Heartbeat (interval tetap atau adaptif)
 4. Overlay Scanner (window title & class blacklist) + Publisher Whitelist
 5. Driver Scanner (enumerasi driver user-mode via SCM / snapshot)
@@ -39,14 +42,16 @@ Anti-cheat modular user-mode untuk Ragnarok (RRO.exe) ditulis dalam C++17 (VS202
 25. Risk command cooldown (KILL_PROCESS & QUARANTINE_FILE minimal 2s + abuse counter)
 
 ## Scheduler & Adaptive Profiling
+
 - Setiap detector memiliki interval dasar (`IntervalMs()`).
 - Profiling otomatis mengukur `lastDurationMs` dan `avgDurationMs`.
-- Adaptive mode internal: jika rata-rata > 75ms dan belum override manual ? interval dinaikkan bertahap (maks 4x base). Jika < 25ms dan sudah melebar ? diturunkan secara bertahap ke base.
+- Adaptive mode internal: jika rata-rata > ADAPT_INCREASE_THRESHOLD (default 75ms) dan belum override manual â†’ interval dinaikkan bertahap (maks ADAPT_INTERVAL_MULT_MAX x base, default 4x). Jika < ADAPT_DECREASE_THRESHOLD (default 25ms) dan sudah melebar â†’ diturunkan bertahap ke base.
 - Override manual (SET_INTERVAL) menonaktifkan adaptasi untuk detector tersebut sampai di-clear.
 - RESET_PROFILER menghapus statistik (tidak mengubah interval).
 - SELFTEST mengeksekusi semua `Tick()` secara sinkron untuk audit cepat (hasil dalam ms atau ERR).
 
 ## Format Pesan Log
+
 - `INFO|Tag|Detail`
 - `DETECTION|Feature|Detail`
 - PROLOG_LIST:
@@ -57,7 +62,8 @@ Anti-cheat modular user-mode untuk Ragnarok (RRO.exe) ditulis dalam C++17 (VS202
 - Hasil command / operasi runtime lain menggunakan tag khusus: `INFO|RESULT|...`, `INFO|INTERVALS|...`, `INFO|SELFTEST|...`
 
 ## Daftar Command (PipeCommandServer)
-```
+
+```text
 CLOSE_CLIENT
 UPDATE_BLACKLIST <process.exe>
 UPDATE_MODULE_BLACKLIST <dllname>
@@ -92,15 +98,18 @@ GET_STATUS
 ```
 
 ### Catatan Command Baru
+
 - `SET_INTERVAL` / `CLEAR_INTERVAL` memodifikasi interval scheduler tanpa rebuild.
 - `LIST_INTERVALS` menampilkan `<nama>=<ms>` (tanda `*` jika override manual aktif).
 - `RESET_PROFILER` menghapus statistik (interval tetap).
 - `SELFTEST` mengukur durasi aktual tick masing-masing detector satu kali.
-- Cooldown: `KILL_PROCESS` & `QUARANTINE_FILE` minimal 2000 ms antar eksekusi; percobaan terlalu cepat menghasilkan pesan COOLDOWN (dibatasi 5 notifikasi, sisanya silent).
+- Cooldown: `KILL_PROCESS` & `QUARANTINE_FILE` minimal `CMD_RISK_COOLDOWN_MS` (default 2000 ms) antar eksekusi; percobaan terlalu cepat menghasilkan pesan COOLDOWN (dibatasi `CMD_ABUSE_THRESHOLD` notifikasi, sisanya silent).
 
 ## Policy File Format (UTF-8)
+
 Section order bebas; baris kosong / `#` diabaikan.
-```
+
+```text
 [process]
 cheatengine.exe
 [module]
@@ -124,45 +133,89 @@ kernel32.dll 12
 heartbeat 10000
 antiinjection 7000
 ```
+
 Catatan:
+
 - Semua entry dipaksa lowercase saat load.
 - `prolog`: `<module> <func> <minBytes>`.
 - `chunk_whitelist`: `<module> <chunkIndex>` (index 0, chunk 4096B).
 - `interval`: `<detector_name_lower> <ms>`; override adaptif dan manual di-set sebelum scheduler start.
 
 ## Cara Menggunakan (Ringkas)
+
 1. Build solution (Client DLL + Server exe).
 2. Injeksi / load DLL client ke proses game (launcher internal / manual). Pipe server opsional (client retry connect).
 3. (Opsional) `PIPE_SET_XOR_KEY 5a`, `PIPE_ROLLING_XOR_ON`, `PIPE_SET_CRC_ON`.
 4. `POLICY_LOAD file.policy` untuk konfigurasi awal (atau fallback embedded).
-5. Pantau `DETECTION|...` – proses akan dihentikan oleh `ShowDetectionAndExit` untuk event kritis.
+5. Pantau `DETECTION|...` ï¿½ proses akan dihentikan oleh `ShowDetectionAndExit` untuk event kritis.
 6. Kelola hooks prolog: `PROLOG_ADD_TARGET`, lalu `PROLOG_REBASELINE`, cek `PROLOG_LIST`.
 7. Whitelist chunk OS update: pakai output Integrity mismatch ? `WHITELIST_CHUNK_ADD`, lalu `POLICY_SAVE`.
 8. Atur interval dynamic: `SET_INTERVAL AntiInjection 8000`, atau reset: `CLEAR_INTERVAL AntiInjection` / `CLEAR_INTERVAL_ALL`.
 9. Audit kinerja: `SELFTEST`, atau profiling ringkas via `GET_STATUS`.
 
 ## Heartbeat Adaptif
+
 - Interval dasar (misal 10s) dapat dinaikkan ketika sistem idle; pengaturan adaptif ON/OFF via command.
 
 ## Rolling XOR + Nonce
+
 - Format: `NONCE=xxxxxxxx;<payload_obfuscated>`
 - `PIPE_SET_XOR_KEY <hex>` mereset nonce.
 
 ## CRC32 Tagging
+
 - Diaktifkan via `PIPE_SET_CRC_ON`; pesan memiliki suffix `|CRC=XXXXXXXX` sebelum obfuscation.
 
 ## Delta & Chunk Whitelist
+
 - Full mismatch ? re-hash per chunk 4KB; hanya chunk bukan whitelist ? deteksi.
 
 ## Runtime Stats & Profiling
+
 - `GET_STATUS` menampilkan ringkas rata-rata ms (maks 10 detector pertama yang sudah run >0 kali).
 - `LIST_INTERVALS` menampilkan interval aktif (tanda `*` = override manual; adaptif tidak diberi tanda khusus saat ini).
 
 ## Self Test
+
+Menjalankan satu siklus semua detector secara serial untuk benchmarking cepat performa.
+
+## Konfigurasi Terpusat (`Config.h`)
+
+Semua angka penting ditempatkan di `include/Config.h` untuk menghindari hard-code tersebar:
+
+| Kategori | Konstanta | Default | Deskripsi |
+|----------|-----------|---------|----------|
+| Command Rate | `CMD_WINDOW_MS` | 3000 | Jendela sliding ms untuk rate limiting perintah |
+| Command Rate | `CMD_MAX_RECENT` | 20 | Maks perintah dalam window sebelum ditolak |
+| Risk Cooldown | `CMD_RISK_COOLDOWN_MS` | 2000 | Cooldown perintah berisiko (kill/quarantine) |
+| Risk Cooldown | `CMD_ABUSE_THRESHOLD` | 5 | Notifikasi cooldown maksimum sebelum silent |
+| Adaptive | `ADAPT_INCREASE_THRESHOLD` | 75.0 | Ambang naikkan interval (ms avg) |
+| Adaptive | `ADAPT_DECREASE_THRESHOLD` | 25.0 | Ambang turunkan interval |
+| Adaptive | `ADAPT_INTERVAL_MULT_MAX` | 4 | Batas kelipatan interval dasar |
+| Scheduler | `SCHED_MIN_SLEEP_MS` | 10 | Clamp sleep loop minimum |
+| Slow Alert | `DEFAULT_SLOW_THRESHOLD_MS` | 120.0 | Ambang ms dianggap lambat |
+| Slow Alert | `DEFAULT_SLOW_ALERT_STREAK` | 3 | Streak lambat sebelum alert |
+| Proc Watch | `PROC_WATCH_POLL_IDLE_MS` | 1200 | Delay fallback saat idle |
+| Proc Watch | `PROC_WATCH_POLL_ACTIVE_MS` | 750 | Delay fallback saat ada perubahan |
+| Pipe | `PIPE_RECONNECT_MS` | 2000 | Delay reconnect pipe gagal |
+| Pipe | `PIPE_IDLE_SLEEP_MS` | 200 | Delay idle saat queue kosong |
+| TCP | `TCP_IDLE_SLEEP_MS` | 200 | Delay idle send loop TCP |
+| Buffers | `PIPE_CMD_BUFFER` | 1024 | Ukuran buffer baca command pipe |
+| Buffers | `TCP_HOST_MAX` | 256 | Batas panjang hostname UTF-8 |
+| Buffers | `MODULE_ENUM_MAX` | 1024 | Maks modul saat enumerasi IAT / signature |
+| Buffers | `PROCESS_ENUM_RESERVE` | 1024 | Reserve vector snapshot proses |
+| Buffers | `WINDOW_TITLE_MAX` | 256 | Buffer judul window overlay |
+| Buffers | `CHUNK_SIZE` | 4096 | Ukuran chunk hashing integritas |
+| Buffers | `SIGNATURE_SCAN_MAX` | 16MB | Batas maksimum bytes discan signature |
+| Buffers | `CAPTURE_MAX` | 256 | Panjang capture stub syscall |
+
+Ubah nilai sesuai kebutuhan tanpa menyentuh modul lain; rebuild akan menerapkan semuanya.
+
 - `SELFTEST` menjalankan satu siklus `Tick()` semua detector secara serial dan mengembalikan durasi ms per nama.
 - Berguna untuk baseline performa / investigasi lag.
 
 ## Keamanan & Limitasi
+
 - User-mode only; tidak mencegah driver ring-0.
 - Inline hook detection terbatas prolog awal.
 - Hash .text sensitif terhadap patch OS (gunakan whitelist).
@@ -170,6 +223,7 @@ Catatan:
 - Rate limit command global & cooldown risk command mencegah flood dasar; tidak menggantikan ACL pipe.
 
 ## Rekomendasi Deployment
+
 1. Sertakan embedded fallback policy.
 2. Sign DLL client.
 3. Atur ACL pipe (PRODUCTION) untuk batasi akses.
@@ -177,10 +231,12 @@ Catatan:
 5. Simpan policy terenkripsi (opsional) & verifikasi signature.
 
 ## Build
+
 - VS2022, C++17.
 - Release Win32.
 
 ## Pengujian Cepat
+
 1. Jalankan PipeServer & PipeCommandServer.
 2. Load DLL di game.
 3. `GET_STATUS` (cek uptime, profiling bertambah).
@@ -189,5 +245,24 @@ Catatan:
 6. Tambah whitelist chunk ? simpan policy ? verifikasi tidak deteksi lagi.
 7. `SELFTEST` dan periksa waktu eksekusi.
 
+## Test Harness (Integrity + Scheduler)
+
+File: `tests/IntegritySchedulerHarness.cpp`
+
+Tujuan:
+
+- Menangkap baseline integritas untuk kernel32/ntdll/user32/gdi32 lalu re-check cepat.
+- Menjalankan `DetectorScheduler::RunSelfTest()` pada subset detector integritas dan menampilkan durasi.
+
+Cara pakai (tambahkan sebagai proyek console terpisah atau kompilasi manual):
+
+1. Tambah file ke project baru (Console, Unicode, static runtime opsional).
+2. Pastikan include path mengarah ke `Oblivion_Client/include`.
+3. Link library Windows standar (psapi.lib sudah dipakai oleh beberapa detector).
+4. Jalankan; output menampilkan baseline capture dan hasil selftest.
+
+Catatan: Harness tidak membuka pipe; logging detection akan fallback ke stdout bila mekanisme pipe tidak aktif.
+
 ## Lisensi
+
 Hanya untuk proteksi aplikasi Anda sendiri. Tidak untuk distribusi publik tanpa izin penulis.

@@ -6,29 +6,29 @@
 #include <windows.h>
 
 namespace OblivionEye {
-
-    AntiTestMode& AntiTestMode::Instance() { static AntiTestMode s; return s; }
-
-    static bool CheckBCDTestSigning() {
-        HKEY hKey;
+namespace {
+    bool CheckBCDTestSigning() {
+        HKEY hKey = nullptr;
         DWORD val = 0, size = sizeof(val);
-        if (RegOpenKeyExW(HKEY_LOCAL_MACHINE, L"SYSTEM\\CurrentControlSet\\Control\\CI", 0, KEY_READ, &hKey) == ERROR_SUCCESS) {
-            if (RegQueryValueExW(hKey, L"TestFlags", nullptr, nullptr, reinterpret_cast<LPBYTE>(&val), &size) == ERROR_SUCCESS) {
-                RegCloseKey(hKey);
-                if (val != 0) return true;
-            } else {
-                RegCloseKey(hKey);
-            }
-        }
+        if (RegOpenKeyExW(HKEY_LOCAL_MACHINE, L"SYSTEM\\CurrentControlSet\\Control\\CI", 0, KEY_READ, &hKey) != ERROR_SUCCESS)
+            return false;
+
+        LSTATUS st = RegQueryValueExW(hKey, L"TestFlags", nullptr, nullptr, reinterpret_cast<LPBYTE>(&val), &size);
+        RegCloseKey(hKey);
+        if (st == ERROR_SUCCESS && val != 0)
+            return true;
         return false;
     }
+}
 
-    bool AntiTestMode::IsTestModeEnabled() { return CheckBCDTestSigning(); }
+AntiTestMode &AntiTestMode::Instance() { static AntiTestMode s; return s; }
 
-    void AntiTestMode::Tick() {
-        if (IsTestModeEnabled()) {
-            EventReporter::SendDetection(L"AntiTestMode", L"/testsigning");
-            ShowDetectionAndExit(L"Windows Test Mode terdeteksi");
-        }
+bool AntiTestMode::IsTestModeEnabled() { return CheckBCDTestSigning(); }
+
+void AntiTestMode::Tick() {
+    if (IsTestModeEnabled()) {
+        EventReporter::SendDetection(L"AntiTestMode", L"/testsigning");
+        ShowDetectionAndExit(L"Windows Test Mode terdeteksi");
     }
+}
 }

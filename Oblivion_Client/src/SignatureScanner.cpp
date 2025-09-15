@@ -1,5 +1,6 @@
 #include "../pch.h"
 #include "../include/SignatureScanner.h"
+#include "../include/Config.h"
 #include "../include/Signatures.h"
 #include "../include/Logger.h"
 #include "../include/Utils.h"
@@ -12,8 +13,8 @@
 #pragma comment(lib, "psapi.lib")
 
 namespace OblivionEye {
-
-    static bool MatchAt(const uint8_t* data, size_t size, const BytePattern& pat) {
+namespace {
+    bool MatchAt(const uint8_t *data, size_t size, const BytePattern &pat) {
         if (size < pat.bytes.size()) return false;
         for (size_t i = 0; i < pat.bytes.size(); ++i) {
             if (pat.mask[i] && data[i] != pat.bytes[i]) return false;
@@ -21,48 +22,47 @@ namespace OblivionEye {
         return true;
     }
 
-    static bool ScanBuffer(const uint8_t* data, size_t size, const BytePattern& pat) {
+    bool ScanBuffer(const uint8_t *data, size_t size, const BytePattern &pat) {
         if (pat.bytes.empty()) return false;
-        size_t maxSize = size > (16 * 1024 * 1024) ? (16 * 1024 * 1024) : size;
+    size_t maxSize = size > OblivionEye::Config::SIGNATURE_SCAN_MAX ? OblivionEye::Config::SIGNATURE_SCAN_MAX : size; // cap scan size
         for (size_t i = 0; i + pat.bytes.size() <= maxSize; ++i) {
             if (MatchAt(data + i, maxSize - i, pat)) return true;
         }
         return false;
     }
+}
 
-    SignatureScanner& SignatureScanner::Instance() { static SignatureScanner s; return s; }
+SignatureScanner &SignatureScanner::Instance() { static SignatureScanner s; return s; }
 
-    bool SignatureScanner::ScanModule(HMODULE hMod, const wchar_t* modName) {
-        MODULEINFO mi{};
-        if (!GetModuleInformation(GetCurrentProcess(), hMod, &mi, sizeof(mi))) return false;
-        auto base = reinterpret_cast<uint8_t*>(mi.lpBaseOfDll);
-        size_t size = static_cast<size_t>(mi.SizeOfImage);
-        const auto& sigs = GetSignatures();
-        for (const auto& sig : sigs) {
-            if (ScanBuffer(base, size, sig)) {
-                EventReporter::SendDetection(L"SignatureScanner", sig.name + L" in " + modName);
-                ShowDetectionAndExit(L"Signature match: " + sig.name + L" in " + modName);
-                return true;
-            }
+bool SignatureScanner::ScanModule(HMODULE hMod, const wchar_t *modName) {
+    MODULEINFO mi{};
+    if (!GetModuleInformation(GetCurrentProcess(), hMod, &mi, sizeof(mi))) return false;
+    auto base = reinterpret_cast<uint8_t*>(mi.lpBaseOfDll);
+    size_t size = static_cast<size_t>(mi.SizeOfImage);
+
+    const auto &sigs = GetSignatures();
+    for (const auto &sig : sigs) {
+        if (ScanBuffer(base, size, sig)) {
+            EventReporter::SendDetection(L"SignatureScanner", sig.name + L" in " + modName);
+            ShowDetectionAndExit(L"Signature match: " + sig.name + L" in " + modName);
+            return true; // exit path above, but consistent return
         }
-        return false;
     }
+    return false;
+}
 
-    bool SignatureScanner::ScanMemory() {
-        HMODULE mods[1024] = {};
-        DWORD needed = 0;
-        if (!EnumProcessModules(GetCurrentProcess(), mods, sizeof(mods), &needed)) return false;
-        int count = needed / sizeof(HMODULE);
-        wchar_t name[MAX_PATH];
-        for (int i = 0; i < count; ++i) {
-            if (GetModuleBaseNameW(GetCurrentProcess(), mods[i], name, MAX_PATH)) {
-                if (ScanModule(mods[i], name)) return true;
-            }
+bool SignatureScanner::ScanMemory() {
+    HMODULE mods[OblivionEye::Config::MODULE_ENUM_MAX] = {}; DWORD needed = 0;
+    if (!EnumProcessModules(GetCurrentProcess(), mods, sizeof(mods), &needed)) return false;
+    int count = static_cast<int>(needed / sizeof(HMODULE));
+    wchar_t name[MAX_PATH];
+    for (int i = 0; i < count; ++i) {
+        if (GetModuleBaseNameW(GetCurrentProcess(), mods[i], name, MAX_PATH)) {
+            if (ScanModule(mods[i], name)) return true;
         }
-        return false;
     }
+    return false;
+}
 
-    void SignatureScanner::Tick() {
-        ScanMemory();
-    }
+void SignatureScanner::Tick() { ScanMemory(); }
 }

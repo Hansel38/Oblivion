@@ -1,5 +1,6 @@
 #include "../pch.h"
 #include "../include/OverlayScanner.h"
+#include "../include/Config.h"
 #include "../include/OverlayBlacklist.h"
 #include "../include/Utils.h"
 #include "../include/Logger.h"
@@ -33,9 +34,9 @@ namespace OblivionEye {
     OverlayScanner& OverlayScanner::Instance() { static OverlayScanner s; return s; }
 
     bool OverlayScanner::IsBlacklistedWindow(HWND hwnd) {
-        wchar_t title[256] = {};
+    wchar_t title[OblivionEye::Config::WINDOW_TITLE_MAX] = {};
         wchar_t cls[128] = {};
-        GetWindowTextW(hwnd, title, 256);
+    GetWindowTextW(hwnd, title, OblivionEye::Config::WINDOW_TITLE_MAX);
         GetClassNameW(hwnd, cls, 128);
 
         std::wstring titleL = ToLower(title);

@@ -8,6 +8,8 @@
 #include <string>
 #include <sstream>
 #include <iomanip>
+#include "../include/Config.h"
+#include "../include/StringUtil.h"
 
 namespace OblivionEye {
 
@@ -77,10 +79,8 @@ namespace OblivionEye {
     }
 
     void PipeClient::Send(const std::wstring& msg) {
-        int len = WideCharToMultiByte(CP_UTF8, 0, msg.c_str(), -1, nullptr, 0, nullptr, nullptr);
-        std::string utf8(len, '\0');
-        WideCharToMultiByte(CP_UTF8, 0, msg.c_str(), -1, &utf8[0], len, nullptr, nullptr);
-        if (!utf8.empty() && utf8.back()=='\0') utf8.pop_back();
+        auto utf8 = StringUtil::WideToUtf8(msg);
+        if (utf8.empty()) return;
         Enqueue(BuildPacket(utf8));
     }
 
@@ -109,7 +109,7 @@ namespace OblivionEye {
         Log(L"PipeClient start");
         while (m_running) {
             EnsureConnected();
-            if (g_hPipe == INVALID_HANDLE_VALUE) { std::this_thread::sleep_for(std::chrono::milliseconds(2000)); continue; }
+            if (g_hPipe == INVALID_HANDLE_VALUE) { std::this_thread::sleep_for(std::chrono::milliseconds(Config::PIPE_RECONNECT_MS)); continue; }
             std::string msg;
             {
                 std::lock_guard<std::mutex> lk(g_qMtx);
@@ -120,7 +120,7 @@ namespace OblivionEye {
                 BOOL ok = WriteFile(g_hPipe, msg.c_str(), (DWORD)msg.size(), &written, nullptr);
                 if (!ok) ClosePipe();
             } else {
-                std::this_thread::sleep_for(std::chrono::milliseconds(200));
+                std::this_thread::sleep_for(std::chrono::milliseconds(Config::PIPE_IDLE_SLEEP_MS));
             }
         }
         ClosePipe();

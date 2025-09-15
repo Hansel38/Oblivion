@@ -143,11 +143,13 @@
     <ClInclude Include="include\AntiSuspend.h" />
     <ClInclude Include="include\AntiTestMode.h" />
     <ClInclude Include="include\Blacklist.h" />
+    <ClInclude Include="include\DetectionCorrelator.h" />
     <ClInclude Include="include\DetectorScheduler.h" />
     <ClInclude Include="include\DigitalSignature.h" />
     <ClInclude Include="include\DigitalSignatureScanner.h" />
     <ClInclude Include="include\DriverBlacklist.h" />
     <ClInclude Include="include\DriverScanner.h" />
+    <ClInclude Include="include\EATHookChecker.h" />
     <ClInclude Include="include\EmbeddedPolicy.h" />
     <ClInclude Include="include\EventReporter.h" />
     <ClInclude Include="include\FileIntegrity.h" />
@@ -175,6 +177,7 @@
     <ClInclude Include="include\Signatures.h" />
     <ClInclude Include="include\SignatureScanner.h" />
     <ClInclude Include="include\SignatureTrust.h" />
+    <ClInclude Include="include\SyscallStubChecker.h" />
     <ClInclude Include="include\TcpClient.h" />
     <ClInclude Include="include\TestModeSpoofChecker.h" />
     <ClInclude Include="include\ThreadRegistry.h" />
@@ -195,11 +198,13 @@
     <ClCompile Include="src\AntiSuspend.cpp" />
     <ClCompile Include="src\AntiTestMode.cpp" />
     <ClCompile Include="src\Blacklist.cpp" />
+    <ClCompile Include="src\DetectionCorrelator.cpp" />
     <ClCompile Include="src\DetectorScheduler.cpp" />
     <ClCompile Include="src\DigitalSignature.cpp" />
     <ClCompile Include="src\DigitalSignatureScanner.cpp" />
     <ClCompile Include="src\DriverBlacklist.cpp" />
     <ClCompile Include="src\DriverScanner.cpp" />
+    <ClCompile Include="src\EATHookChecker.cpp" />
     <ClCompile Include="src\EventReporter.cpp" />
     <ClCompile Include="src\FileIntegrity.cpp" />
     <ClCompile Include="src\Gdi32Integrity.cpp" />
@@ -225,6 +230,7 @@
     <ClCompile Include="src\Signatures.cpp" />
     <ClCompile Include="src\SignatureScanner.cpp" />
     <ClCompile Include="src\SignatureTrust.cpp" />
+    <ClCompile Include="src\SyscallStubChecker.cpp" />
     <ClCompile Include="src\TcpClient.cpp" />
     <ClCompile Include="src\TestModeSpoofChecker.cpp" />
     <ClCompile Include="src\ThreadRegistry.cpp" />

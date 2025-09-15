@@ -11,112 +11,73 @@
 #include <vector>
 #include <string>
 #include <algorithm>
+#include "../include/Config.h"
 #include <wbemidl.h>
 #include <comdef.h>
+
 #pragma comment(lib, "wbemuuid.lib")
 
 namespace OblivionEye {
-
-    static bool IsBlacklistedName(const std::wstring& nameLower) {
-        for (const auto& item : GetBlacklistedProcessNames()) {
-            if (nameLower == ToLower(item)) return true;
+namespace {
+    bool IsBlacklistedName(const std::wstring &nameLower) {
+        for (const auto &item : GetBlacklistedProcessNames()) {
+            if (nameLower == ToLower(item))
+                return true;
         }
         return false;
     }
 
-    ProcessWatcher& ProcessWatcher::Instance() {
-        static ProcessWatcher inst;
-        return inst;
-    }
-
-    void ProcessWatcher::Start() {
-        if (m_running.exchange(true)) return;
-        std::thread([this]() {
-            Log(L"ProcessWatcher mulai: initial scan");
-            InitialScan();
-            Log(L"ProcessWatcher: monitoring proses baru (WMI jika tersedia)");
-            WatchNewProcesses();
-        }).detach();
-    }
-
-    void ProcessWatcher::Stop() {
-        m_running = false;
-    }
-
-    void ProcessWatcher::InitialScan() {
-        HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-        if (snap == INVALID_HANDLE_VALUE) return;
-        PROCESSENTRY32W pe{}; pe.dwSize = sizeof(pe);
-        if (Process32FirstW(snap, &pe)) {
-            do {
-                std::wstring nameLower = ToLower(pe.szExeFile);
-                if (IsBlacklistedName(nameLower)) {
-                    EventReporter::SendDetection(L"ProcessWatcher", pe.szExeFile);
-                    ShowDetectionAndExit(pe.szExeFile);
-                    CloseHandle(snap);
-                    return;
-                }
-            } while (Process32NextW(snap, &pe));
-        }
-        CloseHandle(snap);
-    }
-
-    // WMI event watcher: __InstanceCreationEvent for Win32_Process
-    static bool WatchWithWmi(std::atomic<bool>& running) {
-        HRESULT hr = CoInitializeEx(0, COINIT_MULTITHREADED);
+    bool WatchWithWmi(std::atomic<bool> &running) {
+        HRESULT hr = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
         bool comInit = SUCCEEDED(hr);
-        if (FAILED(hr) && hr != RPC_E_CHANGED_MODE) return false;
+        if (FAILED(hr) && hr != RPC_E_CHANGED_MODE)
+            return false;
 
-        hr = CoInitializeSecurity(NULL, -1, NULL, NULL,
-            RPC_C_AUTHN_LEVEL_DEFAULT, RPC_C_IMP_LEVEL_IMPERSONATE, NULL, EOAC_NONE, NULL);
-        // If already initialized, continue.
+        // Initialize security (ignore failure if already initialized)
+        CoInitializeSecurity(nullptr, -1, nullptr, nullptr,
+                             RPC_C_AUTHN_LEVEL_DEFAULT, RPC_C_IMP_LEVEL_IMPERSONATE,
+                             nullptr, EOAC_NONE, nullptr);
 
-        IWbemLocator* pLoc = nullptr;
-        hr = CoCreateInstance(CLSID_WbemLocator, 0, CLSCTX_INPROC_SERVER, IID_IWbemLocator, (LPVOID*)&pLoc);
+        IWbemLocator *pLoc = nullptr;
+        hr = CoCreateInstance(CLSID_WbemLocator, nullptr, CLSCTX_INPROC_SERVER,
+                              IID_IWbemLocator, reinterpret_cast<LPVOID*>(&pLoc));
         if (FAILED(hr) || !pLoc) { if (comInit) CoUninitialize(); return false; }
 
-        IWbemServices* pSvc = nullptr;
-        hr = pLoc->ConnectServer(_bstr_t(L"ROOT\\CIMV2"), NULL, NULL, 0, 0, 0, 0, &pSvc);
+        IWbemServices *pSvc = nullptr;
+        hr = pLoc->ConnectServer(_bstr_t(L"ROOT\\CIMV2"), nullptr, nullptr, 0, 0, 0, 0, &pSvc);
         if (FAILED(hr) || !pSvc) { pLoc->Release(); if (comInit) CoUninitialize(); return false; }
 
-        hr = CoSetProxyBlanket(pSvc, RPC_C_AUTHN_WINNT, RPC_C_AUTHZ_NONE, NULL,
-            RPC_C_AUTHN_LEVEL_CALL, RPC_C_IMP_LEVEL_IMPERSONATE, NULL, EOAC_NONE);
+        hr = CoSetProxyBlanket(pSvc, RPC_C_AUTHN_WINNT, RPC_C_AUTHZ_NONE, nullptr,
+                               RPC_C_AUTHN_LEVEL_CALL, RPC_C_IMP_LEVEL_IMPERSONATE,
+                               nullptr, EOAC_NONE);
         if (FAILED(hr)) { pSvc->Release(); pLoc->Release(); if (comInit) CoUninitialize(); return false; }
 
-        IEnumWbemClassObject* pEnumerator = nullptr;
+        IEnumWbemClassObject *pEnumerator = nullptr;
         BSTR query = SysAllocString(L"SELECT TargetInstance FROM __InstanceCreationEvent WITHIN 1 WHERE TargetInstance ISA 'Win32_Process'");
-        BSTR lang = SysAllocString(L"WQL");
-        hr = pSvc->ExecNotificationQuery(lang, query, WBEM_FLAG_RETURN_IMMEDIATELY, NULL, &pEnumerator);
+        BSTR lang  = SysAllocString(L"WQL");
+        hr = pSvc->ExecNotificationQuery(lang, query, WBEM_FLAG_RETURN_IMMEDIATELY, nullptr, &pEnumerator);
         SysFreeString(query); SysFreeString(lang);
         if (FAILED(hr) || !pEnumerator) {
-            pSvc->Release(); pLoc->Release(); if (comInit) CoUninitialize(); return false;
-        }
+            pSvc->Release(); pLoc->Release(); if (comInit) CoUninitialize(); return false; }
 
         while (running) {
-            IWbemClassObject* pObj = nullptr; ULONG ret = 0;
-            hr = pEnumerator->Next(1000, 1, &pObj, &ret); // 1s timeout to check running flag
+            IWbemClassObject *pObj = nullptr; ULONG ret = 0;
+            hr = pEnumerator->Next(1000, 1, &pObj, &ret); // 1s poll to check flag
             if (hr == WBEM_S_TIMEDOUT) continue;
             if (FAILED(hr) || ret == 0) break;
 
             VARIANT vtInst; VariantInit(&vtInst);
-            if (SUCCEEDED(pObj->Get(L"TargetInstance", 0, &vtInst, 0, 0)) && vtInst.vt == VT_UNKNOWN && vtInst.punkVal) {
-                IWbemClassObject* pTarget = nullptr;
-                if (SUCCEEDED(vtInst.punkVal->QueryInterface(IID_IWbemClassObject, (void**)&pTarget)) && pTarget) {
+            if (SUCCEEDED(pObj->Get(L"TargetInstance", 0, &vtInst, nullptr, nullptr)) && vtInst.vt == VT_UNKNOWN && vtInst.punkVal) {
+                IWbemClassObject *pTarget = nullptr;
+                if (SUCCEEDED(vtInst.punkVal->QueryInterface(IID_IWbemClassObject, reinterpret_cast<void**>(&pTarget))) && pTarget) {
                     VARIANT vtName; VariantInit(&vtName);
-                    if (SUCCEEDED(pTarget->Get(L"Name", 0, &vtName, 0, 0)) && vtName.vt == VT_BSTR && vtName.bstrVal) {
+                    if (SUCCEEDED(pTarget->Get(L"Name", 0, &vtName, nullptr, nullptr)) && vtName.vt == VT_BSTR && vtName.bstrVal) {
                         std::wstring nameLower = ToLower(vtName.bstrVal);
                         if (IsBlacklistedName(nameLower)) {
                             EventReporter::SendDetection(L"ProcessWatcher.WMI", vtName.bstrVal);
-                            VariantClear(&vtName);
-                            pTarget->Release();
-                            VariantClear(&vtInst);
-                            pObj->Release();
-                            pEnumerator->Release();
-                            pSvc->Release();
-                            pLoc->Release();
-                            if (comInit) CoUninitialize();
-                            ShowDetectionAndExit(vtName.bstrVal);
-                            return true; // unreachable after ExitProcess, but keep for structure
+                            VariantClear(&vtName); pTarget->Release(); VariantClear(&vtInst); pObj->Release();
+                            pEnumerator->Release(); pSvc->Release(); pLoc->Release(); if (comInit) CoUninitialize();
+                            ShowDetectionAndExit(vtName.bstrVal); return true; // ExitProcess expected
                         }
                     }
                     VariantClear(&vtName);
@@ -131,52 +92,82 @@ namespace OblivionEye {
         pSvc->Release();
         pLoc->Release();
         if (comInit) CoUninitialize();
-        return true; // gracefully ended (stop requested)
+        return true; // graceful end
     }
+}
 
-    void ProcessWatcher::WatchNewProcesses() {
-        // Coba gunakan WMI event; jika gagal, fallback ke polling ringan
-        if (!WatchWithWmi(m_running)) {
-            Log(L"ProcessWatcher: WMI gagal, fallback ke polling");
-            std::vector<DWORD> known;
-            known.reserve(1024);
-            while (m_running) {
-                HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-                if (snap == INVALID_HANDLE_VALUE) {
-                    std::this_thread::sleep_for(std::chrono::milliseconds(500));
-                    continue;
-                }
-                std::vector<DWORD> current;
-                current.reserve(1024);
+ProcessWatcher &ProcessWatcher::Instance() { static ProcessWatcher inst; return inst; }
 
-                PROCESSENTRY32W pe{}; pe.dwSize = sizeof(pe);
-                if (Process32FirstW(snap, &pe)) {
-                    do {
-                        current.push_back(pe.th32ProcessID);
-                        if (std::find(known.begin(), known.end(), pe.th32ProcessID) == known.end()) {
-                            std::wstring nameLower = ToLower(pe.szExeFile);
-                            if (IsBlacklistedName(nameLower)) {
-                                CloseHandle(snap);
-                                EventReporter::SendDetection(L"ProcessWatcher", pe.szExeFile);
-                                ShowDetectionAndExit(pe.szExeFile);
-                                return;
-                            }
-                        }
-                    } while (Process32NextW(snap, &pe));
-                }
+void ProcessWatcher::Start() {
+    if (m_running.exchange(true)) return;
+    std::thread([this]() {
+        Log(L"ProcessWatcher: initial scan");
+        InitialScan();
+        Log(L"ProcessWatcher: monitoring (WMI if available)");
+        WatchNewProcesses();
+    }).detach();
+}
+
+void ProcessWatcher::Stop() { m_running = false; }
+
+void ProcessWatcher::InitialScan() {
+    HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (snap == INVALID_HANDLE_VALUE) return;
+
+    PROCESSENTRY32W pe{}; pe.dwSize = sizeof(pe);
+    if (Process32FirstW(snap, &pe)) {
+        do {
+            std::wstring nameLower = ToLower(pe.szExeFile);
+            if (IsBlacklistedName(nameLower)) {
+                EventReporter::SendDetection(L"ProcessWatcher", pe.szExeFile);
                 CloseHandle(snap);
-                DWORD prevSize = (DWORD)known.size();
-                known.swap(current);
-                DWORD sleepMs = (prevSize == known.size()) ? 1200 : 750;
-                std::this_thread::sleep_for(std::chrono::milliseconds(sleepMs));
+                ShowDetectionAndExit(pe.szExeFile);
+                return;
             }
-        }
+        } while (Process32NextW(snap, &pe));
     }
+    CloseHandle(snap);
+}
 
-    void ProcessWatcher::Tick() {
-        // Health check: if previously running but thread died unexpectedly (rare), restart.
-        if (!m_running.load()) {
-            Start();
+void ProcessWatcher::WatchNewProcesses() {
+    // Prefer WMI events; fall back to polling if unavailable
+    if (!WatchWithWmi(m_running)) {
+        Log(L"ProcessWatcher: WMI unavailable, fallback to polling");
+    std::vector<DWORD> known; known.reserve(OblivionEye::Config::PROCESS_ENUM_RESERVE);
+        while (m_running) {
+            HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+            if (snap == INVALID_HANDLE_VALUE) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(500));
+                continue;
+            }
+            std::vector<DWORD> current; current.reserve(OblivionEye::Config::PROCESS_ENUM_RESERVE);
+            PROCESSENTRY32W pe{}; pe.dwSize = sizeof(pe);
+            if (Process32FirstW(snap, &pe)) {
+                do {
+                    current.push_back(pe.th32ProcessID);
+                    if (std::find(known.begin(), known.end(), pe.th32ProcessID) == known.end()) {
+                        std::wstring nameLower = ToLower(pe.szExeFile);
+                        if (IsBlacklistedName(nameLower)) {
+                            CloseHandle(snap);
+                            EventReporter::SendDetection(L"ProcessWatcher", pe.szExeFile);
+                            ShowDetectionAndExit(pe.szExeFile);
+                            return;
+                        }
+                    }
+                } while (Process32NextW(snap, &pe));
+            }
+            CloseHandle(snap);
+            DWORD prevSize = static_cast<DWORD>(known.size());
+            known.swap(current);
+            DWORD sleepMs = (prevSize == known.size()) ? Config::PROC_WATCH_POLL_IDLE_MS : Config::PROC_WATCH_POLL_ACTIVE_MS;
+            std::this_thread::sleep_for(std::chrono::milliseconds(sleepMs));
         }
     }
+}
+
+void ProcessWatcher::Tick() {
+    // Health check: restart if previously started but flag cleared unexpectedly
+    if (!m_running.load())
+        Start();
+}
 }

@@ -1,46 +1,50 @@
 // dllmain.cpp : Defines the entry point for the DLL application.
 #include "pch.h"
-#include "include/ProcessWatcher.h"
-#include "include/Heartbeat.h"
-#include "include/OverlayScanner.h"
-#include "include/DriverScanner.h"
+
+// Project headers (alphabetically grouped)
 #include "include/AntiDebug.h"
-#include "include/AntiSuspend.h"
-#include "include/ThreadRegistry.h"
 #include "include/AntiInjection.h"
-#include "include/DigitalSignatureScanner.h"
+#include "include/AntiSuspend.h"
 #include "include/AntiTestMode.h"
-#include "include/SignatureScanner.h"
-#include "include/PipeClient.h"
+#include "include/DetectorScheduler.h"
+#include "include/DigitalSignatureScanner.h"
+#include "include/EATHookChecker.h"
+#include "include/FileIntegrity.h"
+#include "include/Gdi32Integrity.h"
+#include "include/HWID.h"
+#include "include/HandleProtection.h"
+#include "include/Heartbeat.h"
 #include "include/HijackedThreadDetector.h"
 #include "include/IATHookChecker.h"
-#include "include/TestModeSpoofChecker.h"
-#include "include/HWID.h"
-#include "include/FileIntegrity.h"
-#include "include/TcpClient.h"
-#include "include/HandleProtection.h"
-#include "include/PublisherWhitelist.h"
-#include "include/PipeCommandClient.h"
-#include "include/PrologHookChecker.h"
-#include "include/NtdllIntegrity.h"
 #include "include/Kernel32Integrity.h"
-#include "include/User32Integrity.h"
-#include "include/Gdi32Integrity.h"
-#include "include/RuntimeStats.h"
-#include "include/DetectorScheduler.h"
-#include "include/PolicyManager.h"
 #include "include/Logger.h"
+#include "include/NtdllIntegrity.h"
+#include "include/OverlayScanner.h"
+#include "include/PipeClient.h"
+#include "include/PipeCommandClient.h"
+#include "include/PolicyManager.h"
+#include "include/ProcessWatcher.h"
+#include "include/PrologHookChecker.h"
+#include "include/PublisherWhitelist.h"
+#include "include/RuntimeStats.h"
+#include "include/SignatureScanner.h"
+#include "include/SyscallStubChecker.h"
+#include "include/TcpClient.h"
+#include "include/TestModeSpoofChecker.h"
+#include "include/ThreadRegistry.h"
+#include "include/User32Integrity.h"
+
 #include <mutex>
 
 extern "C" __declspec(dllexport) void OblivionEye_Entry() {}
 
-namespace OblivionEye { static void RegisterTickDetectorsOnce(); }
-
 namespace OblivionEye {
+    // Ensures detectors are registered exactly once irrespective of how many times initialization is attempted.
     static std::once_flag g_registerOnce;
+
     static void RegisterTickDetectorsOnce() {
-        std::call_once(g_registerOnce, [](){
-            auto& sched = DetectorScheduler::Instance();
+        std::call_once(g_registerOnce, []() {
+            auto &sched = DetectorScheduler::Instance();
             sched.Add(&ProcessWatcher::Instance());
             sched.Add(&AntiTestMode::Instance());
             sched.Add(&AntiInjection::Instance());
@@ -58,51 +62,65 @@ namespace OblivionEye {
             sched.Add(&User32Integrity::Instance());
             sched.Add(&Gdi32Integrity::Instance());
             sched.Add(&TestModeSpoofChecker::Instance());
+            sched.Add(&EATHookChecker::Instance());
+            sched.Add(&SyscallStubChecker::Instance());
             sched.Start();
             Log(L"Detector registration completed (once)");
         });
     }
-}
 
-static void LoadPolicySafe() {
-    // Simplify: avoid mixed SEH/C++ to satisfy compiler (/EHsc)
-    bool ok = false;
-    try {
-        ok = OblivionEye::PolicyManager::LoadPolicy(L"policy.txt");
-    } catch (...) {
-        ok = false;
+    static void LoadPolicySafe() {
+        bool ok = false;
+        try {
+            ok = PolicyManager::LoadPolicy(L"policy.txt");
+        } catch (...) {
+            ok = false; // swallow; we only log below
+        }
+        if (!ok) {
+            Log(L"Policy: load failed or exception; embedded fallback in use");
+        } else {
+            Log(L"Policy: loaded successfully");
+        }
     }
-    if (!ok) {
-        OblivionEye::Log(L"Policy: load failed or exception; embedded fallback in use");
-    } else {
-        OblivionEye::Log(L"Policy: loaded successfully");
-    }
-}
 
-BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID lpReserved) {
-    switch (reason) {
-    case DLL_PROCESS_ATTACH: {
+    // Process-level initialization
+    static void OnProcessAttach(HMODULE hModule) {
         DisableThreadLibraryCalls(hModule);
-        OblivionEye::HandleProtection::Apply();
-        OblivionEye::RuntimeStats::Instance().SetStartTick();
-        OblivionEye::RegisterThreadId(GetCurrentThreadId());
-        OblivionEye::PipeClient::Instance().Start(L"\\\\.\\pipe\\OblivionEye");
-        OblivionEye::PipeCommandClient::Instance().Start(L"\\\\.\\pipe\\OblivionEyeCmd");
+        HandleProtection::Apply();
+        RuntimeStats::Instance().SetStartTick();
+        RegisterThreadId(GetCurrentThreadId());
+        PipeClient::Instance().Start(L"\\\\.\\pipe\\OblivionEye");
+        PipeCommandClient::Instance().Start(L"\\\\.\\pipe\\OblivionEyeCmd");
         LoadPolicySafe();
-        OblivionEye::ProcessWatcher::Instance().Start();
-        OblivionEye::RegisterTickDetectorsOnce();
-        break; }
+        ProcessWatcher::Instance().Start();
+        RegisterTickDetectorsOnce();
+    }
+
+    // Process-level shutdown
+    static void OnProcessDetach() {
+        DetectorScheduler::Instance().Stop();
+        PipeCommandClient::Instance().Stop();
+        TcpClient::Instance().Stop();
+        PipeClient::Instance().Stop();
+    }
+
+    static void OnThreadAttach() { RegisterThreadId(GetCurrentThreadId()); }
+    static void OnThreadDetach() { UnregisterThreadId(GetCurrentThreadId()); }
+} // namespace OblivionEye
+
+BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID /*lpReserved*/) {
+    switch (reason) {
+    case DLL_PROCESS_ATTACH:
+        OblivionEye::OnProcessAttach(hModule);
+        break;
     case DLL_THREAD_ATTACH:
-        OblivionEye::RegisterThreadId(GetCurrentThreadId());
+        OblivionEye::OnThreadAttach();
         break;
     case DLL_THREAD_DETACH:
-        OblivionEye::UnregisterThreadId(GetCurrentThreadId());
+        OblivionEye::OnThreadDetach();
         break;
     case DLL_PROCESS_DETACH:
-        OblivionEye::DetectorScheduler::Instance().Stop();
-        OblivionEye::PipeCommandClient::Instance().Stop();
-        OblivionEye::TcpClient::Instance().Stop();
-        OblivionEye::PipeClient::Instance().Stop();
+        OblivionEye::OnProcessDetach();
         break;
     }
     return TRUE;
