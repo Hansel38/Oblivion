@@ -16,7 +16,9 @@ namespace OblivionEye {
         void Stop() {}
     private:
         OverlayScanner() = default;
-        bool IsBlacklistedWindow(HWND hwnd);
+    bool IsBlacklistedWindow(HWND hwnd);
+    int ScorePotentialCheatEngine(HWND hwnd); // heuristik varian CE rebrand
+    bool HeuristicDetectCheatEngine(HWND hwnd);
         static BOOL CALLBACK EnumWindowsThunk(HWND hwnd, LPARAM lParam);
     };
 }

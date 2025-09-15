@@ -80,9 +80,14 @@ void PrologHookChecker::CaptureBaselines(bool forceAll) {
                 { L"kernel32.dll", "WriteProcessMemory", 8 },
                 { L"kernel32.dll", "ReadProcessMemory", 8 },
                 { L"kernel32.dll", "OpenProcess", 8 },
+                { L"kernel32.dll", "GetTickCount", 8 },
+                { L"kernel32.dll", "GetTickCount64", 8 },
+                { L"kernel32.dll", "QueryPerformanceCounter", 8 },
                 { L"ntdll.dll",    "NtOpenProcess", 8 },
                 { L"ntdll.dll",    "NtWriteVirtualMemory", 8 },
                 { L"ntdll.dll",    "NtReadVirtualMemory", 8 },
+                { L"ntdll.dll",    "NtQueryPerformanceCounter", 8 },
+                { L"ntdll.dll",    "NtDelayExecution", 8 },
             };
             m_baselines.clear();
         }

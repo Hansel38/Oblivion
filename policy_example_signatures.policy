@@ -1,0 +1,10 @@
+# Example Policy with Dynamic Signatures
+[process]
+cheatengine.exe
+
+[signature]
+# Default (include built-in if you still want them active)
+ce_speedhack_jmp|E9 ?? ?? ?? ?? 90 90
+ce_ui_first_next|46 69 72 73 74 20 53 63 61 6E 00 00 00 4E 65 78 74 20 53 63 61 6E
+# Additional experimental pattern (dummy bytes)
+ce_alloc_stub|FF 15 ?? ?? ?? ?? 8B ?? ?? 89

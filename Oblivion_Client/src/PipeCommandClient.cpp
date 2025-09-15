@@ -1,5 +1,6 @@
 #include "../pch.h"
 #include "../include/PipeCommandClient.h"
+#include "../include/DetectionCorrelator.h"
 #include "../include/Logger.h"
 #include "../include/Blacklist.h"
 #include "../include/ModuleBlacklist.h"
@@ -21,6 +22,7 @@
 #include <string>
 #include <sstream>
 #include <deque>
+#include "../include/Signatures.h"
 
 namespace OblivionEye {
     static HANDLE g_hCmdPipe = INVALID_HANDLE_VALUE;
@@ -109,6 +111,55 @@ namespace OblivionEye {
     else if (cmd == "SELFTEST") { auto res = DetectorScheduler::Instance().RunSelfTest(); std::wstring w; for(size_t i=0;i<res.size();++i){ if(i) w+=L","; w+=res[i].name + L"=" + (res[i].durationMs>=0? std::to_wstring((int)res[i].durationMs)+L"ms":L"ERR"); } SendUtf8(L"SELFTEST", w); }
     else if (cmd == "PROFILER_DETAIL") { auto det = DetectorScheduler::Instance().GetProfilerDetails(); std::wstring w; for(size_t i=0;i<det.size();++i){ if(i) w+=L";"; const auto& d=det[i]; w+=d.name+L",run="+std::to_wstring(d.runCount)+L",last="+std::to_wstring((int)d.lastMs)+L"ms,avg="+std::to_wstring((int)d.avgMs)+L"ms,int="+std::to_wstring(d.interval)+L"(base="+std::to_wstring(d.baseInterval)+L")"+(d.overridden?L"*":(d.adaptive?L"~":L"")); } SendUtf8(L"PROFILER_DETAIL", w); }
     else if (cmd == "QUEUE_DUMP") { auto q = DetectorScheduler::Instance().GetQueueSnapshot(); std::wstring w; for(size_t i=0;i<q.size();++i){ if(i) w+=L","; w+=q[i].name+L"="+std::to_wstring(q[i].remainingMs)+L"ms/"+std::to_wstring(q[i].intervalMs)+L"ms"+(q[i].overridden?L"*":(q[i].adaptive?L"~":L"")); } SendUtf8(L"QUEUE_DUMP", w); }
+    else if (cmd == "SIGNATURE_LIST") { auto &sigs = GetSignatures(); std::wstring w; for (size_t i=0;i<sigs.size(); ++i){ if(i) w+=L"|"; w += sigs[i].name + L"(" + std::to_wstring(sigs[i].bytes.size()) + L")"; } if(w.empty()) w=L"<empty>"; SendUtf8(L"SIGNATURE_LIST", w); }
+    else if (cmd == "CORR_STATUS") { auto w = DetectionCorrelator::Instance().GetStatus(); SendUtf8(L"CORR_STATUS", w); }
+    else if (cmd == "CORR_STATUS_JSON") { auto j = DetectionCorrelator::Instance().GetStatusJson(); SendUtf8(L"CORR_STATUS_JSON", std::wstring(j.begin(), j.end())); }
+    else if (cmd == "CORR_RESET") { DetectionCorrelator::Instance().Reset(); SendUtf8(L"CORR_RESET", L"OK"); }
+    else if (cmd == "DUMP_CONFIG") {
+        std::wstringstream ss;
+        ss << L"CMD_WINDOW_MS=" << Config::CMD_WINDOW_MS
+           << L",CMD_MAX_RECENT=" << Config::CMD_MAX_RECENT
+           << L",CMD_RISK_COOLDOWN_MS=" << Config::CMD_RISK_COOLDOWN_MS
+           << L",CMD_ABUSE_THRESHOLD=" << Config::CMD_ABUSE_THRESHOLD
+           << L",ADAPT_INCREASE_THRESHOLD=" << (int)Config::ADAPT_INCREASE_THRESHOLD
+           << L",ADAPT_DECREASE_THRESHOLD=" << (int)Config::ADAPT_DECREASE_THRESHOLD
+           << L",ADAPT_INTERVAL_MULT_MAX=" << Config::ADAPT_INTERVAL_MULT_MAX
+           << L",SCHED_MIN_SLEEP_MS=" << Config::SCHED_MIN_SLEEP_MS
+           << L",DEFAULT_SLOW_THRESHOLD_MS=" << (int)Config::DEFAULT_SLOW_THRESHOLD_MS
+           << L",DEFAULT_SLOW_ALERT_STREAK=" << Config::DEFAULT_SLOW_ALERT_STREAK
+           << L",PROC_WATCH_POLL_IDLE_MS=" << Config::PROC_WATCH_POLL_IDLE_MS
+           << L",PROC_WATCH_POLL_ACTIVE_MS=" << Config::PROC_WATCH_POLL_ACTIVE_MS
+           << L",PIPE_RECONNECT_MS=" << Config::PIPE_RECONNECT_MS
+           << L",PIPE_IDLE_SLEEP_MS=" << Config::PIPE_IDLE_SLEEP_MS
+           << L",TCP_IDLE_SLEEP_MS=" << Config::TCP_IDLE_SLEEP_MS
+           << L",PIPE_CMD_BUFFER=" << Config::PIPE_CMD_BUFFER
+           << L",TCP_HOST_MAX=" << Config::TCP_HOST_MAX
+           << L",MODULE_ENUM_MAX=" << Config::MODULE_ENUM_MAX
+           << L",PROCESS_ENUM_RESERVE=" << Config::PROCESS_ENUM_RESERVE
+           << L",WINDOW_TITLE_MAX=" << Config::WINDOW_TITLE_MAX
+           << L",CHUNK_SIZE=" << Config::CHUNK_SIZE
+           << L",SIGNATURE_SCAN_MAX=" << Config::SIGNATURE_SCAN_MAX
+           << L",CAPTURE_MAX=" << Config::CAPTURE_MAX
+           << L",CE_MIN_WIDTH=" << Config::CE_MIN_WIDTH
+           << L",CE_MIN_HEIGHT=" << Config::CE_MIN_HEIGHT
+           << L",CE_SCORE_THRESHOLD=" << Config::CE_SCORE_THRESHOLD
+           << L",CE_COOLDOWN_MS=" << Config::CE_COOLDOWN_MS
+           << L",CE_REQ_LISTS=" << Config::CE_REQ_LISTS
+           << L",CE_REQ_EDITS=" << Config::CE_REQ_EDITS
+           << L",CE_UI_HITS_SCORE1=" << Config::CE_UI_HITS_SCORE1
+           << L",CE_UI_HITS_SCORE2=" << Config::CE_UI_HITS_SCORE2
+           << L",CE_EARLYSTOP_UI=" << Config::CE_EARLYSTOP_UI
+           << L",CE_EARLYSTOP_LISTS=" << Config::CE_EARLYSTOP_LISTS
+           << L",CE_EARLYSTOP_EDITS=" << Config::CE_EARLYSTOP_EDITS;
+              ss << L",CORR_WINDOW_MS=" << Config::CORR_WINDOW_MS
+                  << L",CORR_PRUNE_INTERVAL_MS=" << Config::CORR_PRUNE_INTERVAL_MS
+                  << L",CORR_SCORE_THRESHOLD=" << Config::CORR_SCORE_THRESHOLD
+                  << L",CORR_TRIGGER_DISTINCT=" << Config::CORR_TRIGGER_DISTINCT
+                  << L",CE_PARTIAL_SCORE=" << Config::CE_PARTIAL_SCORE
+                  << L",SIG_PARTIAL_SCORE=" << Config::SIG_PARTIAL_SCORE
+                  << L",EXT_HANDLE_SCORE=" << Config::EXT_HANDLE_SCORE;
+        SendUtf8(L"CONFIG", ss.str());
+    }
     else if (cmd == "GET_STATUS") { auto snap = RuntimeStats::Instance().GetSnapshot(); auto profiles = DetectorScheduler::Instance().GetProfiles(); std::wstring w = L"detections=" + std::to_wstring(snap.detections) + L" info=" + std::to_wstring(snap.infoEvents) + L" heartbeats=" + std::to_wstring(snap.heartbeats) + L" uptime_sec=" + std::to_wstring(snap.lastUptimeSec); w += L" profiler="; size_t shown=0; for (size_t i=0;i<profiles.size();++i){ if (profiles[i].runCount==0) continue; if(shown) w+=L","; w += profiles[i].name + L":" + std::to_wstring((int)profiles[i].avgDurationMs) + L"ms"; if(++shown>=10) break; } SendUtf8(L"STATUS", w); }
     }
 

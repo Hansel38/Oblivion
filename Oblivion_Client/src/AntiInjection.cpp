@@ -65,6 +65,26 @@ namespace {
         ShowDetectionAndExit(L"Module unsigned/Untrusted: " + path);
         return false;
     }
+    // Probe artefak device Cheat Engine (dbk driver) tanpa menambah detector baru terpisah.
+    // Dilakukan jarang (cooldown) untuk menghindari overhead.
+    unsigned long long g_lastDbkProbe = 0;
+    constexpr unsigned long long DBK_PROBE_INTERVAL_MS = 15000; // 15s
+    const wchar_t* g_dbkDevices[] = { L"\\\\.\\DBKKernel", L"\\\\.\\DBKProc", L"\\\\.\\DBKPhys" };
+
+    void ProbeDbkArtifacts() {
+        unsigned long long now = GetTickCount64();
+        if (now - g_lastDbkProbe < DBK_PROBE_INTERVAL_MS) return;
+        g_lastDbkProbe = now;
+        for (auto dev : g_dbkDevices) {
+            HANDLE h = CreateFileW(dev, GENERIC_READ, FILE_SHARE_READ|FILE_SHARE_WRITE, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+            if (h != INVALID_HANDLE_VALUE) {
+                CloseHandle(h);
+                EventReporter::SendDetection(L"AntiInjection", std::wstring(L"DeviceArtifact ") + dev);
+                ShowDetectionAndExit(std::wstring(L"Device artifact detected: ") + dev);
+                return; // proses sudah dihentikan
+            }
+        }
+    }
 }
 
 AntiInjection &AntiInjection::Instance() { static AntiInjection s; return s; }
@@ -72,8 +92,10 @@ AntiInjection &AntiInjection::Instance() { static AntiInjection s; return s; }
 bool AntiInjection::ScanModules() {
     HMODULE mods[1024] = {};
     DWORD needed = 0;
-    if (!EnumProcessModules(GetCurrentProcess(), mods, sizeof(mods), &needed))
+    if (!EnumProcessModules(GetCurrentProcess(), mods, sizeof(mods), &needed)) {
+        Log(L"AntiInjection: EnumProcessModules gagal");
         return false;
+    }
 
     int count = static_cast<int>(needed / sizeof(HMODULE));
     bool usingWhitelist = !PublisherWhitelist::GetTrusted().empty();
@@ -105,5 +127,10 @@ bool AntiInjection::ScanModules() {
     return false;
 }
 
-void AntiInjection::Tick() { ScanModules(); }
+void AntiInjection::Tick() {
+    ScanModules();
+    ProbeDbkArtifacts();
+}
+
+// (Tick memanggil ProbeDbkArtifacts)
 }

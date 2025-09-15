@@ -10,6 +10,7 @@
 #include "../include/IntegrityChunkWhitelist.h"
 #include "../include/EmbeddedPolicy.h"
 #include "../include/DetectorScheduler.h"
+#include "../include/Signatures.h"
 #include <windows.h>
 #include <string>
 #include <vector>
@@ -36,7 +37,7 @@ namespace {
     }
 
     void ParsePolicyContent(const std::string &data) {
-        enum Section { NONE, PROC, MOD, DRV, OVT, OVC, PUB, PROLOG, CHUNKWL, INTERVAL } sec = NONE;
+    enum Section { NONE, PROC, MOD, DRV, OVT, OVC, PUB, PROLOG, CHUNKWL, INTERVAL, SIG } sec = NONE;
 
         // Reset existing lists before parsing
         ClearBlacklistedProcessNames();
@@ -53,9 +54,13 @@ namespace {
             if (raw[0] == '[') {
                 if (raw == "[process]") sec = PROC; else if (raw == "[module]") sec = MOD; else if (raw == "[driver]") sec = DRV;
                 else if (raw == "[overlay_title]") sec = OVT; else if (raw == "[overlay_class]") sec = OVC; else if (raw == "[publisher]") sec = PUB;
-                else if (raw == "[prolog]") sec = PROLOG; else if (raw == "[chunk_whitelist]") sec = CHUNKWL; else if (raw == "[interval]") sec = INTERVAL; else sec = NONE;
+                else if (raw == "[prolog]") sec = PROLOG; else if (raw == "[chunk_whitelist]") sec = CHUNKWL; else if (raw == "[interval]") sec = INTERVAL;
+                else if (raw == "[signature]") { sec = SIG; ::OblivionEye::ClearSignatures(); }
+                else sec = NONE;
                 continue;
             }
+            // Simpan original wide untuk nama (khusus signature); lowercase copy untuk section lain.
+            auto worig = OblivionEye::StringUtil::Utf8ToWide(raw);
             auto wline = Utf8ToLowerW(raw);
             if (wline.empty()) continue;
 
@@ -80,6 +85,22 @@ namespace {
             case INTERVAL: {
                 std::wstringstream ws(wline); std::wstring name; unsigned val = 0; ws >> name >> val;
                 if (!name.empty() && val > 0) DetectorScheduler::Instance().SetIntervalOverride(name, val);
+            } break;
+            case SIG: {
+                // format: <name>|<pattern hex with ??> (nama: case dipertahankan)
+                auto pipePos = worig.find(L"|");
+                if (pipePos != std::wstring::npos) {
+                    std::wstring nm = worig.substr(0, pipePos); // original case
+                    std::wstring patRaw = worig.substr(pipePos + 1);
+                    // Lowercase pattern untuk fleksibilitas input hex
+                    std::wstring pat = patRaw; std::transform(pat.begin(), pat.end(), pat.begin(), ::towlower);
+                    // Trim spasi depan/belakang sederhana
+                    while (!nm.empty() && iswspace(nm.front())) nm.erase(nm.begin());
+                    while (!nm.empty() && iswspace(nm.back())) nm.pop_back();
+                    while (!pat.empty() && iswspace(pat.front())) pat.erase(pat.begin());
+                    while (!pat.empty() && iswspace(pat.back())) pat.pop_back();
+                    if (!nm.empty() && !pat.empty()) AddSignaturePattern(nm, pat);
+                }
             } break;
             default: break;
             }

@@ -46,4 +46,32 @@ constexpr size_t CHUNK_SIZE             = 4096;              // Integrity hashin
 constexpr size_t SIGNATURE_SCAN_MAX     = 16 * 1024 * 1024;  // Max bytes scanned for signature scan
 constexpr size_t CAPTURE_MAX            = 256;               // Syscall stub capture length
 
+// Cheat Engine heuristic (OverlayScanner) tunables
+constexpr int    CE_MIN_WIDTH           = 400;   // Minimal window width considered
+constexpr int    CE_MIN_HEIGHT          = 300;   // Minimal window height considered
+constexpr int    CE_SCORE_THRESHOLD     = 4;     // Score to trigger detection
+constexpr unsigned long long CE_COOLDOWN_MS = 5ull*60ull*1000ull; // Global cooldown between CE heuristic reports
+constexpr int    CE_REQ_LISTS           = 2;     // ListView count adding score
+constexpr int    CE_REQ_EDITS           = 8;     // Edit control count adding score
+constexpr int    CE_UI_HITS_SCORE1      = 2;     // UI keyword hits threshold for +1
+constexpr int    CE_UI_HITS_SCORE2      = 4;     // Additional UI hits threshold for +1 extra
+constexpr int    CE_EARLYSTOP_UI        = 3;     // Early-stop UI hits (with others) for short-circuit
+constexpr int    CE_EARLYSTOP_LISTS     = 2;     // Early-stop listview minimum
+constexpr int    CE_EARLYSTOP_EDITS     = 6;     // Early-stop edits minimum
+
+// External intrusive handle scan
+constexpr unsigned HANDLE_SCAN_COOLDOWN_MS = 10000; // Minimum ms between full system handle scans
+constexpr size_t   HANDLE_SCAN_MAX_DUP     = 32;     // Max duplicate suspicious entries to report (cap spam)
+
+// Correlation engine tunables
+constexpr unsigned CORR_WINDOW_MS          = 60000;  // Window waktu event tetap dihitung
+constexpr unsigned CORR_PRUNE_INTERVAL_MS  = 5000;   // Interval minimal prune list event
+constexpr unsigned CORR_SCORE_THRESHOLD    = 5;      // Skor trigger hook correlation (lama)
+constexpr unsigned CORR_TRIGGER_DISTINCT   = 3;      // Distinct kategori minimal untuk trigger multi-source partial
+constexpr unsigned CE_PARTIAL_SCORE        = 2;      // Skor diberikan untuk partial CE heuristic
+constexpr unsigned SIG_PARTIAL_SCORE       = 2;      // Skor partial signature (misal 1 cluster string saja)
+constexpr unsigned EXT_HANDLE_SCORE        = 3;      // Skor handle intrusif eksternal
+constexpr unsigned CORR_STATUS_SNAPSHOT_MS = 1500;   // Interval minimal refresh evaluasi status pasif
+constexpr unsigned CORR_DETECTION_COOLDOWN_MS = 10000; // Cooldown sebelum kombinasi detection correlation boleh dikirim lagi
+
 }

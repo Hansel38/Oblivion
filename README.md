@@ -40,6 +40,13 @@ Anti-cheat modular user-mode untuk Ragnarok (RRO.exe) ditulis dalam C++17 (VS202
 23. Self-test framework (SELFTEST) untuk mengukur durasi eksekusi langsung tiap detector
 24. Perintah manajemen interval: SET_INTERVAL / CLEAR_INTERVAL / CLEAR_INTERVAL_ALL / LIST_INTERVALS / RESET_PROFILER
 25. Risk command cooldown (KILL_PROCESS & QUARANTINE_FILE minimal 2s + abuse counter)
+26. Overlay Scanner diperluas dengan heuristik struktur window (deteksi varian Cheat Engine rebrand)
+27. SignatureScanner memuat pola dasar CE (speedhack jump stub, UI string cluster)
+28. PrologHookChecker kini juga baseline timing API (GetTickCount/QueryPerformanceCounter/NtQueryPerformanceCounter/NtDelayExecution)
+29. AntiInjection menambahkan probing artefak device driver CE (\\.\DBKKernel / DBKProc / DBKPhys) dengan cooldown
+30. Dynamic Signature Loading via policy section baru `[signature]` (memungkinkan update pola tanpa rebuild)
+31. External Intrusive Handle Detection (enumerasi system handle mendeteksi proses lain memegang akses WRITE/VM/DEBUG ke proses game)
+32. Weighted Multi-Source Correlation Engine (korelasi hook + partial heuristic/signature + external handle untuk peningkatan confidence dan reduksi false positive)
 
 ## Scheduler & Adaptive Profiling
 
@@ -95,6 +102,11 @@ LIST_INTERVALS
 RESET_PROFILER
 SELFTEST
 GET_STATUS
+DUMP_CONFIG
+SIGNATURE_LIST
+CORR_STATUS
+CORR_STATUS_JSON
+CORR_RESET
 ```
 
 ### Catatan Command Baru
@@ -104,6 +116,8 @@ GET_STATUS
 - `RESET_PROFILER` menghapus statistik (interval tetap).
 - `SELFTEST` mengukur durasi aktual tick masing-masing detector satu kali.
 - Cooldown: `KILL_PROCESS` & `QUARANTINE_FILE` minimal `CMD_RISK_COOLDOWN_MS` (default 2000 ms) antar eksekusi; percobaan terlalu cepat menghasilkan pesan COOLDOWN (dibatasi `CMD_ABUSE_THRESHOLD` notifikasi, sisanya silent).
+- `DUMP_CONFIG` menampilkan nilai konfigurasi aktif (constant compile-time) untuk audit cepat.
+- `SIGNATURE_LIST` menampilkan daftar signature aktif (nama dan panjang pola) setelah load policy.
 
 ## Policy File Format (UTF-8)
 
@@ -132,6 +146,12 @@ kernel32.dll 12
 [interval]
 heartbeat 10000
 antiinjection 7000
+[signature]
+# Format: <nama>|<pola_hex>
+# Gunakan spasi antar byte; wildcard byte gunakan ??
+# Contoh sederhana speedhack stub tambahan (dummy):
+ce_speed_stub2|E9 ?? ?? ?? ?? 90 90
+ui_first_next_cluster|46 69 72 73 74 20 53 63 61 6E 00 00 00 4E 65 78 74 20 53 63 61 6E
 ```
 
 Catatan:
@@ -140,6 +160,40 @@ Catatan:
 - `prolog`: `<module> <func> <minBytes>`.
 - `chunk_whitelist`: `<module> <chunkIndex>` (index 0, chunk 4096B).
 - `interval`: `<detector_name_lower> <ms>`; override adaptif dan manual di-set sebelum scheduler start.
+- `signature`: `<name>|<hex pattern>`; hex harus dipisah spasi (`AA BB CC`), `??` = wildcard. Saat policy load, signature bawaan di-clear lalu diganti pattern baru (gunakan kembali pattern bawaan jika masih ingin aktif).
+
+### Dynamic Signature Loading
+
+Section `[signature]` memperbolehkan menambahkan / mengganti pola runtime tanpa rebuild. Implementasi saat load:
+
+1. Ketika parser menemukan `[signature]`, vector internal signature dibersihkan.
+1. Setiap baris non-komentar dengan format `<nama>|<pola>` diparse:
+
+- Nama disimpan apa adanya (case dilestarikan untuk log).
+- Pola: token dipisah spasi; `??` → wildcard (mask=false), hex (1–2 digit) → byte (mask=true).
+
+1. SignatureScanner menggunakan daftar baru pada tick berikutnya.
+
+Command `SIGNATURE_LIST` dapat dipakai sewaktu-waktu untuk memverifikasi signature mana yang aktif (berguna setelah `POLICY_LOAD`).
+
+Implikasi:
+
+- Semua signature build-in hilang setelah `[signature]` section ditemukan; pastikan salin pola default jika masih ingin menggunakannya.
+- Dapat dipakai untuk eksperimen cepat terhadap varian baru tanpa distribusi binary baru.
+- Validasi minimal: token >2 hex digit akan mengabaikan baris (silent). Pertimbangkan menambah log error jika perlu.
+
+Rekomendasi:
+
+- Simpan file policy baseline yang berisi pola default + tambahan Anda.
+- Gunakan nama konsisten (prefix `ce_`, `tool_`, dll) untuk mempermudah korelasi log.
+
+Contoh minimal hanya signature:
+
+```text
+[signature]
+ce_speedhack_jmp|E9 ?? ?? ?? ?? 90 90
+ce_ui_first_next|46 69 72 73 74 20 53 63 61 6E 00 00 00 4E 65 78 74 20 53 63 61 6E
+```
 
 ## Cara Menggunakan (Ringkas)
 
@@ -179,6 +233,60 @@ Catatan:
 
 Menjalankan satu siklus semua detector secara serial untuk benchmarking cepat performa.
 
+## Correlation Engine
+
+Menggabungkan sinyal (hook, partial heuristic/signature, external handle) dalam jendela `CORR_WINDOW_MS` dan hanya memicu detection korelasi untuk kombinasi bernilai tinggi.
+
+Jalur:
+
+1. HookCorrelation – kombinasi hook (EAT/IAT/PROLOG/SYSCALL) ketika totalScore >= `CORR_SCORE_THRESHOLD`.
+2. MultiSourceCorrelation – distinct kategori >= `CORR_TRIGGER_DISTINCT` dan mengandung CE_PARTIAL / SIG_PARTIAL / EXT_HANDLE.
+
+Kategori aktif:
+
+- EAT, IAT, PROLOG, SYSCALL (indikasi hook / manipulasi eksekusi)
+- CE_PARTIAL (heuristik UI CE kuat tapi < `CE_SCORE_THRESHOLD`; bobot `CE_PARTIAL_SCORE`)
+- SIG_PARTIAL (cluster string/UI saja tanpa stub eksekusi; memberi bobot `SIG_PARTIAL_SCORE` saat belum ada signature kuat lain)
+- EXT_HANDLE (proses eksternal memegang akses tinggi: WRITE/VM/THREAD/DEBUG → bobot `EXT_HANDLE_SCORE`)
+
+Skoring & Evaluasi:
+
+- Setiap Report(category, detail, weight) disimpan dengan timestamp.
+- Prune tiap `CORR_PRUNE_INTERVAL_MS` untuk buang entri tua.
+- Kombinasi unik hanya sekali dilaporkan (cache internal) agar log tidak banjir.
+
+Command: `CORR_STATUS` → contoh `score=5 eat=0 iat=0 prolog=1 syscall=0 ceP=1 sigP=0 handle=1`.
+Command JSON: `CORR_STATUS_JSON` → kunci numerik termasuk metrics internal.
+Reset state: `CORR_RESET` → flush semua entri, cooldown, dan counter metrics.
+
+Contoh Alur:
+
+1. CE_PARTIAL (2) + EXT_HANDLE (3) → score=5 distinct=2 (belum multi-source).
+2. PROLOG hook terdeteksi → distinct=3 → MultiSourceCorrelation tercapai.
+
+Manfaat:
+
+- Turunkan false positive single-signal.
+- Tingkatkan confidence sebelum tindakan fatal.
+- Observabilitas progres investigasi via `CORR_STATUS`.
+
+Roadmap: aktifkan SIG_PARTIAL nyata; bobot dinamis via policy.
+
+Catatan: Partial event tidak menghentikan proses sendiri; hanya detection akhir atau detector kritikal lain yang memicu exit.
+
+### Heuristik Varian Cheat Engine (Integrasi di Overlay Scanner)
+
+Overlay Scanner tidak lagi hanya mengandalkan substring judul / class. Ia sekarang memberi skor pada window top-level (visible, min 400x300) untuk mengidentifikasi pola UI CE yang di-rebrand:
+
+- +2: class root mengandung `TMainForm` atau `TApplication`
+- +2: judul masih mengandung `cheat engine`
+- +1: >=2 ListView child
+- +1: >=8 Edit control
+- +1: child text mengandung `pointer` atau `scan`
+- +1: menu memiliki >=3 kata: File / Edit / Table / Memory / Scan
+
+Trigger skor >=4 → `DETECTION|OverlayScanner|CEHeuristic ...` dan proses dihentikan. Cooldown global 5 menit & setiap HWND hanya dilaporkan sekali per sesi. Ini meningkatkan cakupan terhadap build Cheat Engine yang rename file & title namun masih mempertahankan struktur UI dasar.
+
 ## Konfigurasi Terpusat (`Config.h`)
 
 Semua angka penting ditempatkan di `include/Config.h` untuk menghindari hard-code tersebar:
@@ -208,6 +316,28 @@ Semua angka penting ditempatkan di `include/Config.h` untuk menghindari hard-cod
 | Buffers | `CHUNK_SIZE` | 4096 | Ukuran chunk hashing integritas |
 | Buffers | `SIGNATURE_SCAN_MAX` | 16MB | Batas maksimum bytes discan signature |
 | Buffers | `CAPTURE_MAX` | 256 | Panjang capture stub syscall |
+| CE Heuristic | `CE_MIN_WIDTH` | 400 | Minimum lebar window untuk evaluasi CE |
+| CE Heuristic | `CE_MIN_HEIGHT` | 300 | Minimum tinggi window untuk evaluasi CE |
+| CE Heuristic | `CE_SCORE_THRESHOLD` | 4 | Skor final memicu detection CE |
+| CE Heuristic | `CE_COOLDOWN_MS` | 300000 | Cooldown global laporan CE |
+| CE Heuristic | `CE_REQ_LISTS` | 2 | Jumlah minimal ListView child untuk +1 skor |
+| CE Heuristic | `CE_REQ_EDITS` | 8 | Jumlah minimal Edit control untuk +1 skor |
+| CE Heuristic | `CE_UI_HITS_SCORE1` | 1 | Ambang UI hits pertama early stop (dipakai + pola lain) |
+| CE Heuristic | `CE_UI_HITS_SCORE2` | 2 | Ambang UI hits kedua early stop (skip sisa) |
+| CE Heuristic | `CE_EARLYSTOP_UI` | 3 | Early-stop jika hits UI mencapai nilai ini + indikator lain |
+| CE Heuristic | `CE_EARLYSTOP_LISTS` | 2 | Early-stop jika ListView sudah cukup & indikator lain kuat |
+| CE Heuristic | `CE_EARLYSTOP_EDITS` | 6 | Early-stop jika Edit control banyak comb dengan indikator lain |
+| Handle Scan | `HANDLE_SCAN_COOLDOWN_MS` | 10000 | Cooldown minimal antar enumerasi system handle |
+| Handle Scan | `HANDLE_SCAN_MAX_DUP` | 32 | Batas laporan suspicious agar log tidak banjir |
+| Correlation | `CORR_WINDOW_MS` | 60000 | Window ms event dikumpulkan untuk korelasi |
+| Correlation | `CORR_PRUNE_INTERVAL_MS` | 5000 | Interval prune entri lama |
+| Correlation | `CORR_SCORE_THRESHOLD` | 5 | Ambang skor jalur HookCorrelation |
+| Correlation | `CORR_TRIGGER_DISTINCT` | 3 | Ambang distinct kategori jalur MultiSourceCorrelation |
+| Correlation | `CE_PARTIAL_SCORE` | 2 | Bobot partial CE heuristic (< threshold final) |
+| Correlation | `SIG_PARTIAL_SCORE` | 2 | Bobot partial signature (placeholder) |
+| Correlation | `EXT_HANDLE_SCORE` | 3 | Bobot event external intrusive handle |
+| Correlation | `CORR_STATUS_SNAPSHOT_MS` | 1500 | Interval evaluasi pasif minimal (non highPriority) |
+| Correlation | `CORR_DETECTION_COOLDOWN_MS` | 10000 | Cooldown minimal sebelum kombinasi korelasi dikirim lagi |
 
 Ubah nilai sesuai kebutuhan tanpa menyentuh modul lain; rebuild akan menerapkan semuanya.
 
@@ -245,9 +375,14 @@ Ubah nilai sesuai kebutuhan tanpa menyentuh modul lain; rebuild akan menerapkan 
 6. Tambah whitelist chunk ? simpan policy ? verifikasi tidak deteksi lagi.
 7. `SELFTEST` dan periksa waktu eksekusi.
 
-## Test Harness (Integrity + Scheduler)
+## Test Harness (Integrity + Scheduler + Correlation)
 
 File: `tests/IntegritySchedulerHarness.cpp`
+Tambahan:
+
+- `tests/CorrelationHarness.cpp` – uji jalur skor & distinct multi-source.
+- `tests/CorrelationConcurrent.cpp` – stress multi-thread Report().
+- `tests/CorrelationCooldownHarness.cpp` – verifikasi cooldown detection tidak menggandakan hookDet sebelum waktunya.
 
 Tujuan:
 

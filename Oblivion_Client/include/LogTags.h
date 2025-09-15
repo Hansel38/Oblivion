@@ -10,4 +10,5 @@ namespace OblivionEye::LogTags {
     inline constexpr wchar_t INTERVALS[]  = L"INTERVALS";
     inline constexpr wchar_t SELFTEST[]   = L"SELFTEST";
     inline constexpr wchar_t PROLOG[]     = L"PROLOG";
+    inline constexpr wchar_t CONFIG[]     = L"CONFIG";
 }

@@ -13,4 +13,7 @@ namespace OblivionEye {
     // Mengembalikan daftar signature yang akan discan di memory proses.
     // Catatan: default kosong untuk hindari false positive. Tambahkan secara bertahap.
     const std::vector<BytePattern>& GetSignatures();
+    // Dynamic update (policy loaded) menambahkan signature baru.
+    void ClearSignatures();
+    bool AddSignaturePattern(const std::wstring &name, const std::wstring &pattern); // pattern: "E9 ?? ?? 90" (hex, ?? wildcard)
 }
