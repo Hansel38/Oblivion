@@ -15,5 +15,7 @@ namespace OblivionEye {
         User32Integrity() = default;
         bool Check(); void CaptureBaseline(); bool CaptureSubsectionHashes();
         bool m_baselineCaptured = false; unsigned long long m_baselineHash = 0ULL; std::vector<unsigned long long> m_chunkHashes;
+        // Disk reference snapshot
+        bool m_diskCaptured=false; unsigned long long m_diskHash=0ULL; std::vector<unsigned long long> m_diskChunkHashes;
     };
 }

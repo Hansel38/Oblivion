@@ -74,4 +74,47 @@ constexpr unsigned EXT_HANDLE_SCORE        = 3;      // Skor handle intrusif eks
 constexpr unsigned CORR_STATUS_SNAPSHOT_MS = 1500;   // Interval minimal refresh evaluasi status pasif
 constexpr unsigned CORR_DETECTION_COOLDOWN_MS = 10000; // Cooldown sebelum kombinasi detection correlation boleh dikirim lagi
 
+// Pipe handshake / auth (lightweight; replace key in production build)
+constexpr const wchar_t* PIPE_SHARED_KEY = L"OBLIVION_DEFAULT_KEY"; // placeholder shared secret
+constexpr unsigned PIPE_HANDSHAKE_TIMEOUT_MS = 3000; // handshake timeout ms
+constexpr bool     PIPE_HANDSHAKE_STRICT_DEFAULT = true;  // legacy fallback disabled by default
+constexpr unsigned PIPE_HANDSHAKE_FAIL_WINDOW_MS = 60000;  // window untuk menghitung gagal
+constexpr unsigned PIPE_HANDSHAKE_FAIL_MAX      = 8;       // maksimal gagal dalam window sebelum penalti
+constexpr unsigned PIPE_HANDSHAKE_PENALTY_MS    = 5000;    // sleep ekstra sebelum coba lagi saat over-fail
+constexpr bool     PIPE_HMAC_DEFAULT_ENABLED    = false;   // default HMAC payload dimatikan (aktifkan via command)
+constexpr bool     PIPE_HMAC_REQUIRED_DEFAULT   = false;   // server mewajibkan HMAC (akan enforce setelah verifikasi sisi server siap)
+constexpr unsigned PIPE_REPLAY_WINDOW_MS       = 30000;    // window waktu nonce/log id dianggap masih valid untuk deteksi replay
+constexpr size_t   PIPE_REPLAY_CACHE_MAX       = 4096;     // maksimum entri cache nonce/log untuk replay guard sebelum prune
+constexpr bool     LOG_HANDSHAKE_STRICT_DEFAULT = true;    // server log now requires HELLO (no legacy)
+
+// Sequence number enforcement (ordering + stronger replay semantics)
+constexpr bool     PIPE_SEQ_ENFORCE_DEFAULT    = true;    // Drop out-of-order or missing sequence
+constexpr bool     PIPE_SEQ_WARN_ONLY_DEFAULT  = false;   // If true and enforce also true? (Future). For now use to disable drops by setting ENFORCE false.
+
+// Runtime command security
+constexpr bool     PIPE_SET_REQUIRE_HMAC       = true;    // When true, server will only honor #SET lines if current hmacRequired is true and packet carried valid HMAC
+
+// Security event rate limiting (server-side SecEvent suppression)
+constexpr unsigned SEC_EVT_RATE_WINDOW_MS     = 5000;     // Sliding window length for burst detection
+constexpr unsigned SEC_EVT_RATE_THRESHOLD     = 25;       // Events per window before suppression starts
+constexpr unsigned SEC_EVT_RATE_RESUME_PCT    = 60;       // Resume emission when count in window drops below this % of threshold
+
+// Security event persistence (server side)
+constexpr bool     LOG_EVENT_PERSIST_ENABLED_DEFAULT = false;      // Disabled by default; enable via future #SET LOGPERSIST=1
+constexpr const wchar_t* LOG_EVENT_FILE_BASENAME     = L"SecEvents"; // Base filename; rotation adds .NNN.jsonl
+constexpr size_t   LOG_EVENT_MAX_BYTES               = 512 * 1024;  // Rotate after ~512KB per file
+constexpr unsigned LOG_EVENT_MAX_ROTATIONS           = 5;           // Keep last 5 files (0..4), oldest overwritten in ring
+
+// Memory module section integrity (phase 1)
+constexpr unsigned MEM_SEC_INTEGRITY_INTERVAL_MS = 7000;   // Interval antar pemeriksaan (ms)
+constexpr unsigned MEM_SEC_MAX_SECTIONS          = 16;     // Batas maksimal section yang dicatat per modul
+constexpr const wchar_t* MEM_SEC_HASH_ALGO       = L"SHA256"; // Placeholder (bisa perlu variasi algoritma ke depan)
+
+// Integrity baseline security enhancements
+constexpr bool     INTEGRITY_HMAC_HWID_ENABLED_DEFAULT = true;   // Derive HMAC key from HWID (added to obfuscated static key)
+constexpr bool     INTEGRITY_CHAIN_BASELINE_DEFAULT    = true;   // Chain new baseline HMAC with previous to resist poisoning
+constexpr bool     MODSEC_AUDIT_MODE_DEFAULT           = false;  // When true detections are logged only (no termination)
+constexpr unsigned INTEGRITY_BASELINE_VERSION          = 2;      // Versioned baseline format (upgrade path aware)
+constexpr bool     INTEGRITY_AUTO_WHITELIST_DISK_MATCH_DEFAULT = false; // If true, chunks that differ from old baseline but equal clean disk are auto-whitelisted & baseline refreshed.
+
 }

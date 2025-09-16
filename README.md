@@ -218,7 +218,291 @@ ce_ui_first_next|46 69 72 73 74 20 53 63 61 6E 00 00 00 4E 65 78 74 20 53 63 61 
 
 ## CRC32 Tagging
 
+## HMAC Enforcement (2025-09 Update)
+
+Handshake server kini dapat mengumumkan bahwa setiap payload log wajib menyertakan HMAC (SHA-256) dengan respon `OK HMAC` alih-alih hanya `OK`.
+
+Alur:
+
+1. Client kirim `HELLO <nonceCli>`
+2. Server kirim `CHALLENGE <nonceSrv>`
+3. Client kirim `AUTH <sha256(key + nonceCli + nonceSrv)>`
+4. Server validasi dan balas:
+
+   - `OK HMAC` jika `Config::PIPE_HMAC_REQUIRED_DEFAULT == true`
+   - `OK` jika tidak diwajibkan
+
+5. Client bila menerima `OK HMAC` otomatis mengaktifkan mode HMAC (menambahkan suffix `|H=<sha256(key_or_sessionKey + payload_plain)>`).
+
+Server Verifikasi:
+
+- Jika `PIPE_HMAC_REQUIRED_DEFAULT` true dan paket tidak memiliki `|H=` → paket dibuang (`[Client][HMACFAIL]`).
+- HMAC diverifikasi menggunakan `sessionKey` (hasil derivasi handshake) atau fallback shared key jika session key kosong.
+
+Konfigurasi:
+
+| Konstanta | Efek |
+|-----------|------|
+| `PIPE_HMAC_REQUIRED_DEFAULT` | True → server balas `OK HMAC` dan drop semua payload tanpa HMAC |
+
+Backward Compatibility:
+
+- Klien lama (tidak paham `OK HMAC`) akan gagal mengirim karena tidak pernah menambahkan HMAC dan paket akan didrop → lakukan rollout serempak.
+
+Rollback Cepat:
+
+1. Set `PIPE_HMAC_REQUIRED_DEFAULT` ke `false` dan rebuild server + client.
+2. Server kembali membalas `OK`; klien baru tetap bisa mengirim HMAC (server toleran) karena verifikasi hanya menandai error jika mismatch, bukan ketidakhadiran (kecuali required).
+
+Keamanan:
+
+- HMAC menutup celah modifikasi payload pasca-obfuscation XOR/CRC.
+- Disarankan pasang bersama strict handshake ON untuk menghindari downgrade.
+
+## Integrity & Hardening Enhancements (2025-09 Late Update)
+
+Pembaharuan fokus meningkatkan baseline integrity mirip filosofi proteksi Gepard Shield:
+
+1. Hash Upgrade: Semua hashing integrity `.text` kini memakai SHA-256 truncated 64-bit (8 byte LE) menggantikan FNV1a lama (reduksi collision, masih ringkas untuk logging / storage).
+2. Optional HWID-Derived HMAC: Baseline `NtdllIntegrity` kini diproteksi HMAC-SHA256 menggunakan kunci obfuscated + campuran hash HWID (aktif secara default lewat `INTEGRITY_HMAC_HWID_ENABLED_DEFAULT`). Mencegah baseline spoof sederhana lintas mesin.
+3. Disk Cross-Check Generalized: Delta chunk kini diberi label `(=disk)` bila nilai chunk runtime cocok dengan salinan bersih di disk (module: ntdll, user32; dapat diperluas). Membantu klasifikasi injection in-memory vs patch on-disk.
+4. Whitelist Per-Range: `IntegrityChunkWhitelist` mendukung `AddRange` (interval [start,end]) dan melakukan kompresi interval internal. Policy future dapat mengekspose sintaks range tanpa menimbulkan overhead besar.
+5. Audit Mode (`MODSEC_AUDIT=1`): Mengaktifkan mode hanya-log (tidak memanggil `ExitProcess`) memudahkan tuning di environment QA / staging tanpa mengganggu runtime pemain.
+6. Chained Baseline Persistence: Format baseline `ntdll_baseline.txt` versi 2 memasukkan HMAC versi saat ini dan (opsional) HMAC sebelumnya untuk memitigasi poisoning (injeksi baseline baru tanpa lineage). Konstanta `INTEGRITY_BASELINE_VERSION` menjaga path migrasi.
+7. Kernel Surface Stub: Detector placeholder `KernelSurfaceStub` merekam snapshot ringan PEB (pointer Ldr, ProcessParameters, jumlah modul) untuk mendeteksi drift kasar (indikasi manipulasi struktur userland sebelum driver kernel tersedia).
+8. Memory Heuristics Detector: `MemoryHeuristics` melakukan sweep region committed mencari halaman eksekusi yang juga writable (RWX) dan mendeteksi entropi tinggi (> ~7.3) pada sampel 4KB. Mengurangi blind spot shellcode JIT / packer yang belum dihook.
+9. Config Flags Baru (lihat `Config.h`):
+
+- `INTEGRITY_HMAC_HWID_ENABLED_DEFAULT`
+- `INTEGRITY_CHAIN_BASELINE_DEFAULT`
+- `MODSEC_AUDIT_MODE_DEFAULT`
+- `INTEGRITY_BASELINE_VERSION`
+- `INTEGRITY_AUTO_WHITELIST_DISK_MATCH_DEFAULT`
+
+### Auto Disk-Match Whitelist
+
+Jika `INTEGRITY_AUTO_WHITELIST_DISK_MATCH_DEFAULT` = true, dan semua chunk yang berubah relatif terhadap baseline lama ternyata identik dengan salinan bersih di disk (`(=disk)`), maka:
+
+1. Chunk tersebut otomatis dimasukkan ke whitelist (runtime) untuk modul terkait.
+2. Baseline hash dan chunk hash diperbarui (rebaseline) tanpa men-trigger termination.
+3. Log info dicetak: `auto-whitelisted disk-matching chunks`.
+4. Gunakan bersama `MODSEC_AUDIT=1` untuk fase kalibrasi patch OS → aktifkan flag → jalankan game → kumpulkan log → setelah stabil simpan whitelist permanen via policy (future parser range support).
+
+Keamanan: hanya berlaku jika SEMUA deltas bernilai `(=disk)`. Jika ada satu chunk yang tidak cocok disk (`(!disk)`), proses deteksi normal tetap berjalan.
+
+### Audit Mode Cepat
+
+```powershell
+set MODSEC_AUDIT=1   # Windows PowerShell / CMD
+```
+
+Semua detection akan tetap dipublish (dengan label `(AUDIT)`), tetapi proses tidak diterminate. Gunakan untuk mengumpulkan delta whitelist setelah patch Windows.
+
+### Catatan Migrasi Baseline
+
+- File baseline lama (versi 1) otomatis di-parse dan diserialisasi ulang dalam format versi 2 saat capture baru.
+- Jika HMAC mismatch pada load → baseline diabaikan dan baseline fresh ditangkap ulang.
+
+### Rencana Lanjutan
+
+- Ekstensi disk cross-check ke `kernel32.dll`, `gdi32.dll`.
+- Policy syntax `[chunk_whitelist_range] module start end` (pending parser update).
+- Driver kernel: snapshot SSDT + verifikasi PEB pointer chain -> disuplai ke `KernelSurfaceStub` untuk perbandingan silang.
+- Replay mitigasi tetap bergantung pada nonce unik; HMAC tidak sendiri mencegah replay tanpa nonce guard (yang sudah aktif).
+
+Roadmap Opsional:
+
+- Negotiated capabilities line (misal `OK CAPA:HMAC,CRC`) untuk future extensibility.
+- Sequence number + binding ke HMAC untuk ordering guarantee.
+
+## Sequence Number (Ordering & Stronger Replay Guard)
+
+Fitur ini menambahkan `|SEQ=<uint64>` pada akhir payload sebelum tag HMAC (`|H=`). Sequence dilindungi oleh HMAC sehingga tidak bisa dimodifikasi tanpa terdeteksi.
+
+Format Wire (simplified):
+
+```text
+NONCE=aaaaaaaa; <payload_utf8>|SEQ=42|H=<sha256(sessionKey + payload_utf8|SEQ=42)>
+```
+
+Server Behavior:
+
+1. Verifikasi HMAC (jika required / ada tag) atas string yang masih mengandung `|SEQ=...`.
+2. Parse SEQ (harus segment terakhir sebelum HMAC atau akhir jika HMAC off).
+3. Monotonic check:
+
+   - Pertama: tetapkan baseline (accept).
+   - `seq <= lastSeq`: drop (`[SEQFAIL][ORDER]`) bila enforcement aktif.
+   - `seq == lastSeq + 1`: normal.
+   - `seq > lastSeq + 1`: log gap (`[SEQGAP] expected=<last+1> got=<seq>`) dan accept.
+
+4. Payload final untuk log dibersihkan dari `|SEQ=` (metadata internal).
+
+Konfigurasi:
+
+| Konstanta | Efek |
+|-----------|------|
+| `PIPE_SEQ_ENFORCE_DEFAULT` | True → drop out-of-order atau missing SEQ |
+
+Deployment Notes:
+
+- Klien lama (tanpa SEQ) akan di-drop jika enforcement aktif.
+- Untuk migrasi bertahap: set `PIPE_SEQ_ENFORCE_DEFAULT=false` sementara; server hanya log `[SEQWARN]`.
+- HMAC + SEQ = proteksi integritas & ordering. Nonces tetap dibutuhkan untuk replay window time-based.
+
+Limitasi & Future:
+
+- Tidak ada wrap handling khusus (praktis tak tercapai dalam runtime normal).
+- Belum ada counter statistik gap teragregasi (bisa ditambah untuk telemetri).
+- Belum ada command runtime untuk toggle SEQ enforce (mirip ide toggle HMAC).
+
+## Replay Cache Optimization
+
+Implementasi sebelumnya menggunakan `std::vector` dengan prune linear O(n) dan pencarian duplikat O(n). Sudah diganti menjadi kombinasi `std::deque` (menjaga urutan waktu untuk eviksi window) + `std::unordered_set` (cek keanggotaan O(1) rata-rata). Hasil:
+
+- Insert + lookup → O(1) average.
+- Prune window → loop hanya over entri expired di depan (amortized O(k) kecil).
+- Capacity enforcement → while loop pop front menjaga memori stabil.
+
+Konstanta terkait masih sama (`PIPE_REPLAY_WINDOW_MS`, `PIPE_REPLAY_CACHE_MAX`). Tidak ada perubahan format protokol.
+
+## Runtime Configuration Commands
+
+Server log pipe kini mendukung perintah inline (dikirim sebagai payload biasa) untuk men-toggle fitur tanpa rebuild.
+
+Format:
+
+```text
+#SET HMACREQ=0|1
+#SET SEQENFORCE=0|1
+#DUMP STATE
+```
+
+Perilaku:
+
+- Baris diawali `#SET` diproses sebelum parsing normal dan tidak dilog sebagai payload client.
+- `HMACREQ` mengubah enforcement HMAC runtime (paket tanpa HMAC akan drop jika 1).
+- `SEQENFORCE` mengubah enforcement sequence monotonic runtime.
+
+Keamanan Tambahan:
+
+- `PIPE_SET_REQUIRE_HMAC` (config compile-time) jika `true` memaksa setiap baris `#SET` hanya diterima bila paket memuat HMAC valid. Gunakan ini untuk mencegah downgrade konfigurasi oleh injeksi plaintext.
+
+Catatan Keamanan:
+
+- Tidak ada autentikasi tambahan; hanya gunakan di lingkungan trusted atau layer-kan ACL Named Pipe.
+- Pertimbangkan menambah whitelist origin / HMAC wajib sebelum memproses `#SET` (future hardening).
+
+Contoh:
+
+```text
+#SET HMACREQ=1
+#SET SEQENFORCE=0
+#DUMP STATE
+```
+
+Roadmap Opsional:
+
+- Tambah `#SET REPLAYWINDOW=<ms>` untuk tuning dinamis.
+- Komando `#DUMP STATE` memberikan snapshot HMAC/SEQ flags, lastSeq, replay cache size, dan counter setiap event (`c_<EVENT>` flatten) dalam JSON satu baris.
 - Diaktifkan via `PIPE_SET_CRC_ON`; pesan memiliki suffix `|CRC=XXXXXXXX` sebelum obfuscation.
+
+## Security Event Logging (Structured JSON)
+
+Server kini mengemisi baris JSON satu-per-event (Line-Oriented) untuk semua kejadian keamanan kritikal / anomali protokol. Format ini memudahkan ingestion ke sistem SIEM / log aggregator tanpa perlu parsing regex rapuh atas log teks legacy.
+
+Karakteristik:
+
+- Satu objek JSON per line (tanpa spasi awal / indent) → aman dipipe ke collector.
+- Field minimal selalu ada: `ts` (epoch ms, string), `evt` (kode event), `v` (versi schema saat ini `1`).
+- Field tambahan (key/value) hanya muncul jika relevan (schema forward-compatible: jangan hard-fail bila menemukan field baru).
+- Semua nilai direpresentasikan sebagai string untuk kesederhanaan (hindari masalah tipe lintas bahasa ingestion awal).
+
+Contoh (diringkas, wrapping manual hanya dokumentasi – implementasi real: satu line):
+
+```text
+{"ts":"1726423456789","evt":"HANDSHAKE_FAIL","reason":"TIMEOUT_HELLO","v":1}
+{"ts":"1726423456791","evt":"HANDSHAKE_OK","hmacRequired":"1","v":1}
+{"ts":"1726423456890","evt":"REPLAY_DROP","nonce":"7fa3bc21","v":1}
+{"ts":"1726423457002","evt":"HMAC_FAIL","crcOk":"1","v":1}
+{"ts":"1726423457010","evt":"SEQ_FAIL","type":"ORDER","seq":"105","last":"110","v":1}
+{"ts":"1726423457022","evt":"SEQ_GAP","expected":"210","got":"214","v":1}
+{"ts":"1726423457100","evt":"CFG_SET","key":"HMACREQ","value":"1","v":1}
+{"ts":"1726423457105","evt":"CFG_DENY","reason":"NO_HMAC","key":"SEQENFORCE","v":1}
+{"ts":"1726423457110","evt":"CFG_UNKNOWN","key":"FOO","v":1}
+```
+
+### Daftar Event & Field Khusus
+
+| Event | Deskripsi | Field Tambahan |
+|-------|-----------|----------------|
+| `HANDSHAKE_FAIL` | Handshake gagal (fase HELLO / AUTH) | `reason` (`TIMEOUT_HELLO` / `BAD_AUTH_FORMAT` / `BAD_DIGEST`) |
+| `HANDSHAKE_OK` | Handshake sukses | `hmacRequired` (`1/0`) |
+| `REPLAY_DROP` | Paket ditolak karena nonce sudah pernah diterima dalam window | `nonce` (hex, lower) |
+| `HMAC_FAIL` | Verifikasi HMAC gagal (mismatch) | `crcOk` (`1/0`) menandai apakah CRC (jika ada) lolos |
+| `SEQ_FAIL` | Sequence error dan paket di-drop (enforce aktif) | `type` (`ORDER`/`MISSING`/`ABSENT`), `seq`, `last` (hanya ORDER) |
+| `SEQ_WARN` | Sequence anomali tapi tidak di-drop (enforce off) | `type`, `seq`, `last` (conditional) |
+| `SEQ_GAP` | Diterima dengan gap (seq > last+1) | `expected`, `got` |
+| `CFG_SET` | Runtime config `#SET` diterapkan | `key`, `value` |
+| `CFG_DENY` | `#SET` ditolak (biasanya karena tidak ada HMAC) | `reason` (`NO_HMAC`), `key` |
+| `CFG_UNKNOWN` | `#SET` dengan key tak dikenali | `key` |
+
+Catatan Sequence:
+
+- `SEQ_FAIL` tipe `ORDER`: `seq <= lastSeq` (rewind / duplikat)
+- `SEQ_FAIL` tipe `MISSING`: Tag `|SEQ=` hilang pada paket yang seharusnya memilikinya
+- `SEQ_FAIL` tipe `ABSENT`: Paket sama sekali tanpa field sequence saat enforcement aktif
+- `SEQ_GAP` diterbitkan terpisah meskipun paket diterima (observabilitas gap vs rewind)
+
+### Konsumsi & Integrasi
+
+Langkah umum ingestion:
+
+1. Baca stdout/stderr server → filter baris yang dimulai `{"ts":` (atau parse penuh JSON line-based).
+2. Normalisasi: convert string numerik ke tipe asli bila diperlukan (timestamp, seq).
+3. Index dengan key `evt` untuk query cepat (contoh di Elastic / Loki / Splunk).
+4. Tambah pipeline rule: alert jika `HMAC_FAIL` > N dalam window pendek atau ada `HANDSHAKE_FAIL` berurutan > M.
+
+### Garansi Stabilitas Awal
+
+- Versi schema awal: `v=1`. Penambahan field baru tidak akan mengubah arti field lama.
+- Perubahan nama event akan melalui penambahan alias transisi (misal `evt2`) – belum direncanakan dalam waktu dekat.
+
+### Roadmap Structured Logging
+
+| Tahap | Fitur | Status |
+|-------|-------|--------|
+| 1 | Emisi event protokol dasar (handshake, replay, hmac, seq, cfg) | Selesai |
+| 2 | Counter agregasi & `#DUMP STATE` (JSON snapshot) | Selesai |
+| 3 | Rate limit / sampling event banjir (misal `HMAC_FAIL`) | Planned |
+| 4 | Sink file rotasi (`security_events.log` + size/time rotate) | Planned |
+| 5 | Ekspor opsional ke TCP/UDP syslog / webhook | Exploratory |
+| 6 | Penandaan sesi (session id) di setiap event | Planned |
+
+### Best Practice Operasional
+
+- Simpan raw events minimal 7 hari untuk forensik replay / ordering.
+- Monitor anomali burst `REPLAY_DROP` (indikasi brute-force nonce / injeksi ulang payload).
+- `CFG_DENY` berulang bisa menandakan probing downgrade oleh proses tidak authorized.
+- Aktifkan `PIPE_SET_REQUIRE_HMAC` untuk menutup vektor downgrade `HMACREQ`.
+
+### Contoh Parser Sederhana (Pseudo Python)
+
+```python
+import json, sys
+for line in sys.stdin:
+  if not line.startswith('{"ts"'):
+    continue
+  try:
+    evt = json.loads(line)
+  except json.JSONDecodeError:
+    continue
+  if evt.get('evt') == 'HMAC_FAIL':
+    # increment metric / alert
+    pass
+```
+
+Dengan struktur ini Anda dapat menambah pipeline analytics tanpa perlu memodifikasi kode C++ inti saat menambah tipe event baru.
 
 ## Delta & Chunk Whitelist
 
@@ -351,6 +635,375 @@ Ubah nilai sesuai kebutuhan tanpa menyentuh modul lain; rebuild akan menerapkan 
 - Hash .text sensitif terhadap patch OS (gunakan whitelist).
 - Obfuscation channel bukan kriptografi kuat.
 - Rate limit command global & cooldown risk command mencegah flood dasar; tidak menggantikan ACL pipe.
+- Handshake autentikasi pipe (baru) mengurangi risiko spoof command / sniff sederhana.
+
+### Handshake Autentikasi Pipe (Baru 2025-09)
+
+Untuk menghindari proses asing langsung mengirim command atau membaca log, channel pipe sekarang mendukung handshake ringan berbasis shared key dan nonce:
+
+Alur (client → server command pipe):
+
+1. Client membuka pipe dan mengirim: `HELLO <nonceCliHex>` (`nonceCli` derivatif dari `GetTickCount64()` + pointer internal)
+2. Server membalas: `CHALLENGE <nonceSrvHex>` (`nonceSrv` campuran tick + handle pointer)
+3. Client menghitung: `digest = SHA256( keyUtf8 + nonceCliHex + nonceSrvHex )` (hex lower-case 64 char) dan mengirim: `AUTH <digest>`
+4. Server validasi digest; jika cocok → `OK`, jika tidak → `FAIL` dan koneksi ditutup.
+
+Setelah `OK`, client baru mengirim paket log normal (`NONCE=...;...`). Sebelum autentikasi selesai, queue pesan ditahan (tidak dikirim).
+
+Fallback Legacy: (DINONAKTIFKAN DEFAULT) Sebelumnya, jika server menerima line pertama bukan `HELLO`, ia menganggap client lama dan langsung memproses line itu tanpa autentikasi. Sekarang strict default aktif (`PIPE_HANDSHAKE_STRICT_DEFAULT = true`), koneksi tanpa `HELLO` langsung ditolak. Aktifkan kembali mode lama hanya jika perlu rollback cepat dengan mengubah konstanta / command runtime (jika disediakan).
+
+Shared Key Runtime:
+
+- Nilai awal diambil dari `Config::PIPE_SHARED_KEY` saat start.
+- Dapat diganti runtime melalui command baru: `PIPE_SET_SHARED_KEY <plain_utf8_key>` (tidak disimpan ke policy; rotasi ephemeral).
+- Manajer: `SharedKeyManager` menyimpan key dalam UTF-8 (mutex-protected) dipakai saat menghitung digest handshake.
+
+Pertimbangan Keamanan Tambahan:
+
+- Gunakan ACL/SDDL pada named pipe di server final untuk membatasi siapa bisa connect (handshake bukan substitusi penuh ACL).
+- Ganti RNG nonce menjadi `BCryptGenRandom` untuk entropi lebih kuat bila diperlukan.
+- Tambahkan rate limit terhadap kegagalan handshake (drop setelah N gagal berturut dalam window pendek).
+- Pertimbangkan HMAC per pesan (misal `|H=<sha256(key+payload)>`) jika channel dianggap hostile.
+
+Command Baru:
+
+```text
+PIPE_SET_SHARED_KEY <key_utf8>
+PIPE_HANDSHAKE_STRICT_ON
+PIPE_HANDSHAKE_STRICT_OFF
+PIPE_HMAC_ON
+PIPE_HMAC_OFF
+```
+
+Respon: `INFO|RESULT|PIPE_SET_SHARED_KEY OK` bila sukses.
+
+Catatan Implementasi:
+
+- Digest diserialisasi hex lower-case.
+- Key kosong diabaikan (tidak mereset ke string kosong untuk mencegah degradasi keamanan tidak sengaja).
+- Handshake timeout: `PIPE_HANDSHAKE_TIMEOUT_MS` (default 3000 ms) untuk masing-masing fase baca.
+- Jika handshake gagal: server kirim `FAIL`, menutup handle; client menutup pipe dan retry setelah `PIPE_RECONNECT_MS`.
+
+Fitur Tambahan Baru:
+
+- Strict mode (`PIPE_HANDSHAKE_STRICT_ON`): menolak klien tanpa `HELLO`. SEKARANG DEFAULT ON (`PIPE_HANDSHAKE_STRICT_DEFAULT = true`), sehingga fallback legacy non-handshake tidak diterima kecuali Anda override.
+- Rate limiting gagal handshake: dalam window `PIPE_HANDSHAKE_FAIL_WINDOW_MS` jika gagal ≥ `PIPE_HANDSHAKE_FAIL_MAX`, penalti sleep `PIPE_HANDSHAKE_PENALTY_MS` diterapkan sebelum menerima koneksi baru (memperlambat brute-force digest).
+- RNG nonce memakai `BCryptGenRandom` (fallback ke kombinasi tick+pointer bila gagal) di kedua sisi (client & server) untuk meningkatkan entropi.
+- HMAC payload opsional: bila diaktifkan (`PIPE_HMAC_ON`), setiap payload log sebelum CRC/XOR ditambahkan suffix `|H=<sha256(key+payload_plain)>`. Verifikasi sisi server saat ini belum diterapkan (mode satu arah untuk anti-tamper ringan). Aktifkan setelah memastikan panjang pesan tidak melebihi batas pipeline parsing Anda.
+- Migrasi hashing internal dari CryptoAPI (Wincrypt) ke CNG (`BCrypt*`) untuk konsistensi modern, mengurangi overhead context acquire per hash, dan mempermudah adopsi algoritma lanjutan (misal SHA-512 atau KDF) tanpa refactor besar.
+
+Format Paket Saat HMAC Aktif:
+
+```text
+NONCE=xxxxxxxx;NONCRC|FIELD1|FIELD2|...|H=64hex[|CRC=XXXXXXXX]
+```
+
+Urutan Transformasi:
+
+1. Bangun payload log dasar (sudah disanitasi)
+2. (Opsional) Tambah `|H=` jika HMAC ON
+3. (Opsional) Tambah `|CRC=` jika CRC ON
+4. (Opsional) Rolling XOR seluruh bagian setelah header `NONCE=...;`
+
+Verifikasi Server (Future Work):
+
+- Tambah parsing trailing `|H=` setelah de-obfuscate & sebelum gunakan isi.
+- Validasi dengan key runtime; mismatch → drop / flag tamper.
+(Update 2025-09-16) Implementasi dasar verifikasi HMAC server sudah ditambahkan di `PipeServer.cpp` dengan fallback langsung memakai shared key (belum derivasi session nonce). Jika `|H=` ada, server recompute `sha256(key+payload_without_H)` dan drop bila mismatch.
+Flag baru `PIPE_HMAC_REQUIRED_DEFAULT` disiapkan di `Config.h` (sisi client) untuk memudahkan enforce mode; saat ini server contoh masih `hmacRequired=false` (hard-coded) — ubah sesuai kebutuhan operasi.
+Tahap berikut: derivasi session key: `sessionKey = SHA256(sharedKeyUtf8 + nonceCliHex + nonceSrvHex)` dipakai untuk HMAC sehingga shared key statis tidak langsung terekspos via analisis pola.
+Replay guard (nonce) telah ditambahkan di server contoh: setiap `nonce` (8 hex dari header `NONCE=`) dilacak dalam window `PIPE_REPLAY_WINDOW_MS` dengan batas cache `PIPE_REPLAY_CACHE_MAX`; duplikat dalam window ditandai `[REPLAY]` dan dibuang.
+Session Key (Log Channel): Server melakukan handshake HELLO/CHALLENGE/AUTH untuk channel log (bukan hanya command). Setelah validasi digest (`SHA256(sharedKey + nonceCli + nonceSrv)`), diturunkan `sessionKey = SHA256(sharedKey + nonceCli + nonceSrv)` yang digunakan menggantikan shared key dasar saat verifikasi HMAC payload. Legacy klien tanpa HELLO TIDAK lagi diterima karena strict default aktif.
+
+Parameter Baru di `Config.h`:
+
+| Konstanta | Deskripsi |
+|-----------|-----------|
+| `PIPE_HANDSHAKE_STRICT_DEFAULT` | Default strict mode (false = masih izinkan legacy) |
+| `PIPE_HANDSHAKE_FAIL_WINDOW_MS` | Window perhitungan gagal handshake |
+| `PIPE_HANDSHAKE_FAIL_MAX` | Ambang gagal sebelum penalti |
+| `PIPE_HANDSHAKE_PENALTY_MS` | Lama penalti sleep tambahan |
+| `PIPE_HMAC_DEFAULT_ENABLED` | HMAC payload aktif (default false) |
+| `PIPE_HMAC_REQUIRED_DEFAULT` | Server mewajibkan HMAC (default false) |
+| `PIPE_REPLAY_WINDOW_MS` | Window waktu nonce dianggap valid untuk anti-replay |
+| `PIPE_REPLAY_CACHE_MAX` | Maksimum entri cache nonce sebelum eviksi sederhana |
+
+Roadmap Opsional:
+
+- Komando persist key ke policy terenkripsi (belum ada).
+- Strict mode: tolak legacy tanpa HELLO.
+- Replay guard: cache pasangan nonce (client+server) untuk mencegah reuse dalam window singkat.
+- Penggabungan digest handshake ke header paket (nonce+HMAC) agar setiap pesan terikat pada sesi.
+
+## Session ID (2025-09)
+
+Setiap sesi pipe sekarang diberi `sessionId` 128-bit (hex) yang dihasilkan secara kriptografis pada saat handshake sukses.
+
+Karakteristik:
+
+- Format: 32 hex lowercase (128-bit RNG via `BCryptGenRandom`, fallback entropy jika gagal).
+- Dikirim ke klien di baris handshake: `OK HMAC SESSIONID=<hex>` atau `OK SESSIONID=<hex>`.
+- Otomatis ditambahkan ke setiap event JSON `SecEvent` sebagai field: `"sessionId":"<hex>"` (kecuali sebelum handshake selesai / legacy path).
+- Muncul di output `#DUMP STATE` (`evt":"STATE"`) untuk korelasi alat observasi.
+- Tidak digunakan sebagai key kriptografi; murni identitas korelasi / forensic timeline.
+
+Manfaat:
+
+- Korelasi multi-log (server console, collector eksternal) ke satu sesi koneksi.
+- Investigasi insiden (misal banyak `HMAC_FAIL` → tahu sesi mana tanpa perlu hashing ulang nonce).
+
+Contoh Event Setelah Handshake:
+
+```json
+{"evt":"HANDSHAKE_OK","tick":1234567,"sessionId":"9f2c4c0a5c2b4d19e8ab77b4d2aa1130","hmacRequired":"1"}
+```
+
+Contoh STATE Dump:
+
+```json
+{"evt":"STATE","tick":1236000,"sessionId":"9f2c4c0a5c2b4d19e8ab77b4d2aa1130","hmacRequired":"1","seqEnforce":"1","hasSeqBaseline":"1","lastSeq":"42","replayCache":"5","c_HANDSHAKE_OK":"1","c_STATE_DUMP":"1"}
+```
+
+Integrasi Klien:
+
+- Simpan `sessionId` pada penerimaan handshake untuk tagging log lokal atau channel lain.
+- (Opsional) kirim ulang di jalur command terpisah untuk audit silang.
+
+Keamanan:
+
+- Tidak rahasia; jangan gunakan menggantikan token auth.
+- Jangan masukkan ke HMAC source kecuali ingin mengikat payload ke sesi secara eksplisit (dapat ditambahkan di fase lanjutan).
+
+Langkah Lanjut Potensial:
+
+- Rotasi sessionId jika inactivity > X atau setelah N pesan.
+- Tambah event `SESSION_ROTATE`.
+- Tambah rate-limit keyed by sessionId.
+
+## Security Event Rate Limiting (2025-09)
+
+Untuk mencegah banjir log saat kondisi abnormal (misal banyak paket invalid atau replay), sistem menambahkan rate limiting pada subset event keamanan.
+
+Event yang Saat Ini Di-rate-limit:
+
+- `HMAC_FAIL`
+- `REPLAY_DROP`
+- `SEQ_FAIL`
+- `SEQ_WARN`
+- `SEQ_GAP`
+
+Algoritma:
+
+- Sliding window durasi `SEC_EVT_RATE_WINDOW_MS` (default 5000 ms) per jenis event.
+- Jika jumlah event dalam window melewati `SEC_EVT_RATE_THRESHOLD` (default 25) → mode suppress aktif untuk jenis itu.
+- Saat suppress aktif, event asli dibuang (tidak dicetak) dan counter suppressed bertambah.
+- Ketika jumlah dalam window turun <= (threshold * `SEC_EVT_RATE_RESUME_PCT` / 100) → sistem mengeluarkan ringkasan dan keluar dari suppress mode.
+
+Event Tambahan yang Dihasilkan:
+
+- `RATE_SUPPRESS_START` : menandakan mulai menahan jenis event target.
+- `RATE_SUPPRESS_SUMMARY`: ringkasan jumlah event yang ditahan selama fase suppress.
+
+Contoh (disederhanakan):
+
+```json
+{"evt":"RATE_SUPPRESS_START","tick":123456,"sessionId":"...","target":"HMAC_FAIL","countWindow":"26"}
+{"evt":"RATE_SUPPRESS_SUMMARY","tick":123980,"sessionId":"...","target":"HMAC_FAIL","suppressed":"340"}
+```
+
+Konfigurasi (di `Config.h`):
+
+| Konstanta | Deskripsi |
+|-----------|----------|
+| `SEC_EVT_RATE_WINDOW_MS` | Panjang window sliding (ms) |
+| `SEC_EVT_RATE_THRESHOLD` | Ambang jumlah event sebelum suppression mulai |
+| `SEC_EVT_RATE_RESUME_PCT` | Persentase ambang turun untuk keluar suppression |
+
+### STATE Dump Augmentasi (Rate Limiting)
+
+`#DUMP STATE` kini menyertakan snapshot ringkas status rate limiting:
+
+- `rl_active` : Jumlah event type yang saat ini berada dalam fase suppression.
+- `rl` : Array objek per event yang pernah muncul sejak start (atau sejak pertama kali event muncul) dengan kolom:
+  - `evt` : Nama event (disanitasi, hanya alnum + `_`).
+  - `suppress` : `1` jika sedang suppress, else `0`.
+  - `window` : Jumlah event yang masih berada dalam sliding window (ukuran deque stempel waktu).
+  - `suppressed` : Jumlah event yang telah ditahan selama fase suppress aktif sekarang (reset ke 0 saat suppression berakhir atau belum pernah suppress).
+
+Contoh potongan STATE (dipadatkan):
+
+```json
+{"evt":"STATE","tick":1300455,"sessionId":"9f2c...1130","hmacRequired":"1","seqEnforce":"1","hasSeqBaseline":"1","lastSeq":"42","replayCache":"5","c_HANDSHAKE_OK":"1","c_STATE_DUMP":"2","rl_active":"1","rl":[{"evt":"HMAC_FAIL","suppress":"1","window":"37","suppressed":"12"},{"evt":"SEQ_WARN","suppress":"0","window":"3","suppressed":"0"}]}
+```
+
+Catatan:
+
+- Event type hanya muncul di array setelah minimal satu kejadian tercatat.
+- `window` bisa lebih kecil dari total kumulatif karena entri lama keluar dari sliding window.
+- `suppressed` hanya meningkat selama `suppress=1`.
+- Setelah suppression berakhir dan bucket kembali normal, `suppressed` reset ke `0` pada snapshot berikutnya.
+- `totalSupp` adalah total kumulatif suppressed sejak start (tidak direset ketika fase suppression berakhir, hanya reset oleh RLRESET).
+
+### Runtime Tuning Rate Limiting
+
+Selama koneksi aktif (dan melewati syarat HMAC bila diaktifkan), server mendukung penyesuaian parameter rate limit tanpa restart melalui `#SET`:
+
+- `#SET RTHRESH=<N>` : Ubah ambang jumlah event sebelum suppression. Valid 1 .. 100000.
+- `#SET RWINMS=<MS>` : Ubah panjang window sliding (ms). Valid 100 .. 600000.
+- `#SET RRESUME=<PCT>` : Ubah persentase threshold untuk resume (resume ketika jumlah dalam window <= (threshold * pct / 100)). Valid 1 .. 99.
+- `#SET RLRESET=1` : Reset seluruh bucket rate limiting (menghapus histori window dan suppression counters).
+
+Setiap perubahan menghasilkan event `CFG_SET` dengan `key` salah satu dari `RTHRESH|RWINMS|RRESUME`.
+Jika nilai tidak valid → `CFG_DENY` dengan `reason=RANGE`.
+
+STATE kini juga mengekspor 3 field konfigurasi terkini:
+
+- `rl_thr` : Threshold aktif sekarang.
+- `rl_win` : Window ms aktif sekarang.
+- `rl_resume` : Persentase resume aktif sekarang.
+
+Contoh modifikasi runtime:
+
+```bash
+#SET RTHRESH=40|H=<hmac>
+#SET RWINMS=8000|H=<hmac>
+#SET RRESUME=70|H=<hmac>
+#DUMP STATE|H=<hmac>
+```
+
+Cuplikan STATE setelah perubahan (disingkat):
+
+```json
+{"evt":"STATE","rl_thr":"40","rl_win":"8000","rl_resume":"70", ... }
+```
+
+### Reset & Event Tambahan
+
+Perintah `RLRESET` ketika dieksekusi akan:
+
+- Menghapus semua bucket (histori window & status suppression).
+- Menghasilkan event `RATE_RESET` dengan field:
+  - `buckets` : jumlah bucket sebelum dihapus.
+  - `totalSupp` : akumulasi suppressed (lifetime) semua bucket sebelum reset.
+
+Contoh event:
+
+```json
+{"evt":"RATE_RESET","tick":1310001,"buckets":"2","totalSupp":"352"}
+```
+
+## Persistent Security Event Log (2025-09)
+
+Fitur ini (opsional) menulis setiap baris JSON `SecEvent` ke file `.jsonl` dengan rotasi berbasis ukuran untuk forensic / post-mortem analisis.
+
+Status default: non-aktif (`LOG_EVENT_PERSIST_ENABLED_DEFAULT=false`). Aktifkan runtime via:
+
+```bash
+#SET LOGPERSIST=1|H=<hmac>
+```
+
+Nonaktifkan kembali:
+
+```bash
+#SET LOGPERSIST=0|H=<hmac>
+```
+
+### File & Rotasi
+
+- Basename: `SecEvents` (konfigurasi: `LOG_EVENT_FILE_BASENAME`).
+- Format file: `SecEvents.<N>.jsonl` (ring index 0 .. `LOG_EVENT_MAX_ROTATIONS-1`).
+- Ukuran max per file: `LOG_EVENT_MAX_BYTES` (default 524288 bytes ≈ 512 KB).
+- Setelah melewati batas, indeks maju (mod rotasi) dan file baru di-truncate.
+- Share mode read diizinkan untuk kolektor eksternal tailing.
+
+### Integrasi STATE
+
+- Field `logPersist`: `"1"` jika mode persist aktif, else `"0"`.
+
+### Event & Audit
+
+- Perubahan status menghasilkan `CFG_SET` dengan `key=LOGPERSIST`.
+- File rotasi sendiri tidak memicu event tambahan (sederhana / low noise). Bisa ditambah di masa depan (misal `LOG_ROTATE`).
+
+### Contoh Alur
+
+1. Aktifkan: `#SET LOGPERSIST=1|H=<hmac>` → muncul event `CFG_SET`.
+2. Jalankan beban / serangan simulasi → file `SecEvents.0.jsonl` terisi.
+3. Setelah ukuran ~512KB tercapai → pindah ke `SecEvents.1.jsonl`.
+4. `#DUMP STATE|H=<hmac>` menampilkan `"logPersist":"1"`.
+5. Nonaktifkan: `#SET LOGPERSIST=0|H=<hmac>` → berhenti menulis, file tetap utuh.
+
+### Keterbatasan / Langkah Lanjut
+
+- Tidak ada flush buffer eksplisit (mengandalkan CloseFile per write, I/O sync tapi overhead lebih tinggi).
+- Belum ada timestamp resolusi tinggi (menggunakan `GetTickCount` di payload event seperti sebelumnya).
+- Belum ada kompresi / pemusnahan aman.
+- Belum ada proteksi anti-tamper / signing log.
+- Potensi peningkatan: event `LOG_ROTATE`, hash chaining, CRC footer per file, background batching.
+
+
+## Module Section Integrity (Phase 1 - 2025-09)
+
+Detektor ini melakukan baseline hash section PE (ntdll.dll, kernel32.dll, user32.dll) dan memverifikasi periodik untuk mendeteksi patching runtime (inline hook massal, overwrites) yang tidak ter-cover penuh oleh prolog/IAT/EAT checker.
+
+Rasional: Memberi sinyal coarse-grained bila ada perubahan besar pada section eksekusi/data yang menunjukan injeksi / loader abnormal.
+
+### Mekanisme
+
+1. Tick pertama: enumerasi hingga `MEM_SEC_MAX_SECTIONS` per modul.
+2. Simpan: nama, RVA, ukuran, hash FNV32 sederhana (fase awal; bukan kripto).
+3. Setiap `MEM_SEC_INTEGRITY_INTERVAL_MS` ms: re-hash baseline section.
+4. Perbedaan → event mismatch dan terminasi (fase 1 agresif, akan ditambah mode audit).
+
+### Konfigurasi
+
+| Konstanta | Deskripsi |
+|-----------|----------|
+| `MEM_SEC_INTEGRITY_INTERVAL_MS` | Interval pemeriksaan ulang |
+| `MEM_SEC_MAX_SECTIONS` | Batas section yang direkam |
+| `MEM_SEC_HASH_ALGO` | Placeholder nama algoritma (saat ini FNV32 internal) |
+
+### Event
+
+| Event | Arti |
+|-------|-----|
+| `ModuleSectionIntegrity BASELINE` | Baseline modul selesai |
+| `ModuleSectionIntegrity MISMATCH` | Delta hash / kehilangan section ditemukan |
+
+Contoh (disederhanakan):
+
+```text
+[Detection] ModuleSectionIntegrity BASELINE mod=ntdll.dll sections=10
+[Detection] ModuleSectionIntegrity MISMATCH mod=kernel32.dll deltas=[diff:.text]
+```
+
+### Keterbatasan Fase 1
+
+- Hash mudah di-collide secara teoritis (bukan anti-tamper kuat).
+- Tidak ada whitelist offset intra-section.
+- Tidak validasi terhadap image disk segar.
+- Mismatch langsung exit (false positive risk di beberapa environment hooking legitimate).
+
+### Roadmap Lanjut
+
+- Ganti ke SHA-256 truncated 64-bit.
+- Tambah cross-check mapping disk (lihat pola `NtdllIntegrity`).
+- Whitelist offset / rentang via policy.
+- Mode audit-only dan escalation progresif.
+
+
+
+Keterbatasan Saat Ini:
+
+- Per-event type (tidak global agregat).
+- Tidak ada prioritas (semua jenis di daftar diperlakukan sama).
+- Tidak persist antar sesi.
+
+Future Enhancement Ide:
+
+- Mode adaptive (threshold naik/turun berdasar baseline rata-rata harian).
+- Per-session dan global bucket terpisah.
+- Integrasi dengan external metrics sink (emit delta suppressed per interval tetap).
 
 ## Rekomendasi Deployment
 
@@ -375,29 +1028,104 @@ Ubah nilai sesuai kebutuhan tanpa menyentuh modul lain; rebuild akan menerapkan 
 6. Tambah whitelist chunk ? simpan policy ? verifikasi tidak deteksi lagi.
 7. `SELFTEST` dan periksa waktu eksekusi.
 
-## Test Harness (Integrity + Scheduler + Correlation)
+## Internal Self-Check (Lightweight)
 
-File: `tests/IntegritySchedulerHarness.cpp`
-Tambahan:
+Suite test lama & harness telah dinetralkan dan tidak lagi dibangun. Sebagai gantinya tersedia self-check ringan opsional untuk memverifikasi komponen inti tanpa membuka permukaan kode uji lengkap.
 
-- `tests/CorrelationHarness.cpp` – uji jalur skor & distinct multi-source.
-- `tests/CorrelationConcurrent.cpp` – stress multi-thread Report().
-- `tests/CorrelationCooldownHarness.cpp` – verifikasi cooldown detection tidak menggandakan hookDet sebelum waktunya.
+Aktivasi:
 
-Tujuan:
+Set environment variable sebelum proses host memuat DLL:
 
-- Menangkap baseline integritas untuk kernel32/ntdll/user32/gdi32 lalu re-check cepat.
-- Menjalankan `DetectorScheduler::RunSelfTest()` pada subset detector integritas dan menampilkan durasi.
+```bat
+set OBLIVION_SELFTEST=1
+```
 
-Cara pakai (tambahkan sebagai proyek console terpisah atau kompilasi manual):
+Saat `DllMain` (PROCESS_ATTACH), fungsi `RunInternalSelfCheck()` akan:
 
-1. Tambah file ke project baru (Console, Unicode, static runtime opsional).
-2. Pastikan include path mengarah ke `Oblivion_Client/include`.
-3. Link library Windows standar (psapi.lib sudah dipakai oleh beberapa detector).
-4. Jalankan; output menampilkan baseline capture dan hasil selftest.
+- Mengecilkan ring logger lalu mengisi >N entri untuk memastikan cap bekerja.
+- Memverifikasi determinisme `Sha256HexLower` dan derivasi session key.
+- Mengirim ping log ke pipe jika pipe client sudah berjalan.
+- Merekam hasil ke log Security (`LogSec`).
 
-Catatan: Harness tidak membuka pipe; logging detection akan fallback ke stdout bila mekanisme pipe tidak aktif.
+Output ringkas: baris status `[SC PASS]/[SC FAIL]` di buffer log (dapat diambil via mekanisme snapshot / server log pipe).
+
+Tidak Ada Coverage Untuk:
+
+- Correlation scoring & cooldown.
+- Scheduler exception resilience (hanya implicit melalui operasional biasa).
+- Integrity hashing modul.
+
+Ekstensi Rekomendasi (Opsional):
+
+| Area | Ide Self-Check Tambahan |
+|------|--------------------------|
+| Replay Guard | Injeksi dua NONCE sama → pastikan kedua tidak diterima (butuh hook server) |
+| HMAC | Bangun payload sintetis + recompute server-side hasil sama |
+| Scheduler | Tambah dummy detector tick counter selama 100–200 ms |
+| Correlator | Simulasi beberapa kategori event dan baca skor final |
+
+Rollback: hapus `OBLIVION_SELFTEST` atau buang pemanggilan `RunInternalSelfCheck()` di `dllmain.cpp`.
 
 ## Lisensi
 
 Hanya untuk proteksi aplikasi Anda sendiri. Tidak untuk distribusi publik tanpa izin penulis.
+
+## Logger Enhanced (2025-09)
+
+Logger ditingkatkan dari sekadar OutputDebugString menjadi sistem multi-fitur:
+
+- Level: Debug, Info, Warn, Error, Security.
+- Ring buffer in-memory (default 256 entri) dapat di-snapshot untuk diagnosa atau test.
+- File sink opsional (`EnableFileSink(path, append)`) dengan append atau truncate.
+- Filter level dinamis (`SetLevel(LogLevel::Warn)` menahan log level lebih rendah).
+- API kompatibel lama: `Log(L"msg")` masih bekerja (mapped ke Info).
+- API baru: `LogDbg`, `LogWarn`, `LogErr`, `LogSec`.
+
+Contoh penggunaan:
+
+```cpp
+using namespace OblivionEye;
+LoggerBackend::Instance().SetLevel(LogLevel::Debug);
+LoggerBackend::Instance().EnableFileSink(L"oblivioneye.log");
+LogDbg(L"detector start");
+LogSec(L"suspicious handle detected");
+```
+
+Snapshot ring buffer (misal untuk diagnosa):
+
+```cpp
+auto entries = LoggerBackend::Instance().Snapshot();
+for (auto &e : entries) {/* dump / analyze */}
+```
+
+## Continuous Integration (CI)
+
+Workflow GitHub Actions (`.github/workflows/ci.yml`) ditambahkan untuk:
+
+1. Build proyek `Oblivion_Tests` (Debug x64)
+2. Menjalankan executable test
+3. Memutus workflow (fail) jika exit code != 0
+
+Trigger: push / PR ke branch `main` atau `master`, dan manual dispatch.
+
+YAML ringkas:
+
+```yaml
+name: CI
+on: [push, pull_request]
+jobs:
+  build-test-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: microsoft/setup-msbuild@v2
+      - run: msbuild OblivionEye.sln /t:Oblivion_Tests /p:Configuration=Debug /p:Platform=x64 /m
+      - run: .\\x64\\Debug\\Oblivion_Tests.exe
+```
+
+Rencana lanjutan CI:
+
+- Matrix build (x86 + Release)
+- Artifact upload (log file, policy baseline)
+- Static analysis (clang-tidy / CodeQL)
+- Caching build (incremental) untuk percepatan.

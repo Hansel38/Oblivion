@@ -4,6 +4,7 @@
 #include "../include/EventReporter.h"
 #include "../include/Utils.h"
 #include "../include/IntegrityChunkWhitelist.h"
+#include "../include/HashUtil.h"
 #include "../include/Config.h"
 #include <windows.h>
 #include <sstream>
@@ -11,12 +12,8 @@
 
 namespace OblivionEye {
 namespace {
-    unsigned long long Fnv1a64(const unsigned char *d, size_t l) {
-        const unsigned long long O = 1469598103934665603ULL;
-        const unsigned long long P = 1099511628211ULL;
-        unsigned long long h = O;
-        for (size_t i = 0; i < l; ++i) { h ^= d[i]; h *= P; }
-        return h;
+    inline unsigned long long Hash64(const unsigned char *d, size_t l) {
+        return OblivionEye::HashUtil::Sha256Trunc64(d, l);
     }
 
     std::wstring Hex64(uint64_t v) {
@@ -48,9 +45,8 @@ bool User32Integrity::CaptureSubsectionHashes() {
     const size_t chunk = OblivionEye::Config::CHUNK_SIZE; size_t n = (size + chunk - 1) / chunk;
     m_chunkHashes.resize(n);
     for (size_t i = 0; i < n; ++i) {
-        size_t off = i * chunk;
-        size_t len = (off + chunk <= size) ? chunk : (size - off);
-        m_chunkHashes[i] = Fnv1a64(base + off, len);
+        size_t off = i * chunk; size_t len = (off + chunk <= size) ? chunk : (size - off);
+        m_chunkHashes[i] = Hash64(base + off, len);
     }
     return true;
 }
@@ -59,8 +55,15 @@ void User32Integrity::CaptureBaseline() {
     if (m_baselineCaptured) return;
     unsigned char *base = nullptr; size_t size = 0;
     if (!GetModuleTextRegion(L"user32.dll", base, size)) return;
-    m_baselineHash = Fnv1a64(base, size);
+    m_baselineHash = Hash64(base, size);
     CaptureSubsectionHashes();
+    // Capture disk copy for delta annotation
+    wchar_t sysDir[MAX_PATH]; if(GetSystemDirectoryW(sysDir, MAX_PATH)) {
+        std::wstring path = std::wstring(sysDir) + L"\\user32.dll"; HANDLE f=CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING,0,nullptr); if(f!=INVALID_HANDLE_VALUE){ HANDLE map=CreateFileMappingW(f,nullptr,PAGE_READONLY,0,0,nullptr); if(map){ void* view=MapViewOfFile(map,FILE_MAP_READ,0,0,0); if(view){ unsigned char* b=(unsigned char*)view; auto dos=(PIMAGE_DOS_HEADER)b; if(dos->e_magic==IMAGE_DOS_SIGNATURE){ auto nt=(PIMAGE_NT_HEADERS)(b+dos->e_lfanew); auto sec=IMAGE_FIRST_SECTION(nt); unsigned char* tBase=nullptr; size_t tSize=0; for(unsigned i=0;i<nt->FileHeader.NumberOfSections;++i){ if(strncmp((const char*)sec[i].Name, ".text",5)==0){ tBase=b+sec[i].VirtualAddress; tSize=sec[i].Misc.VirtualSize?sec[i].Misc.VirtualSize:sec[i].SizeOfRawData; break; } } if(tBase && tSize){ m_diskHash=Hash64(tBase,tSize); const size_t chunk = OblivionEye::Config::CHUNK_SIZE; size_t n=(tSize+chunk-1)/chunk; m_diskChunkHashes.resize(n); for(size_t i=0;i<n;++i){ size_t off=i*chunk; size_t len=(off+chunk<=tSize)?chunk:(tSize-off); m_diskChunkHashes[i]=Hash64(tBase+off,len);} m_diskCaptured=true; } }
+                    UnmapViewOfFile(view); }
+                CloseHandle(map); }
+            CloseHandle(f); }
+    }
     m_baselineCaptured = true;
     Log(L"User32Integrity baseline captured");
 }
@@ -68,26 +71,37 @@ void User32Integrity::CaptureBaseline() {
 bool User32Integrity::Check() {
     unsigned char *base = nullptr; size_t size = 0;
     if (!GetModuleTextRegion(L"user32.dll", base, size)) return false;
-    auto current = Fnv1a64(base, size);
+    auto current = Hash64(base, size);
 
     if (!m_baselineCaptured || current == m_baselineHash)
         return false;
 
     const size_t chunk = OblivionEye::Config::CHUNK_SIZE; size_t n = (size + chunk - 1) / chunk;
     std::wstring delta;
+    std::vector<size_t> modifiedIdx; bool allDiskMatches=true;
     for (size_t i = 0; i < n && i < m_chunkHashes.size(); ++i) {
         size_t off = i * chunk;
         size_t len = (off + chunk <= size) ? chunk : (size - off);
-        unsigned long long h = Fnv1a64(base + off, len);
+        unsigned long long h = Hash64(base + off, len);
         if (h != m_chunkHashes[i]) {
             if (IntegrityChunkWhitelist::IsWhitelisted(L"user32.dll", i))
                 continue;
-            delta += L"[" + std::to_wstring(i) + L"@0x" + Hex64(static_cast<uint64_t>(off)) + L"]";
+            modifiedIdx.push_back(i);
+            delta += L"[m" + std::to_wstring(i) + L"@0x" + Hex64(static_cast<uint64_t>(off)) + L"]";
+            if(m_diskCaptured && i < m_diskChunkHashes.size()) {
+                if(m_diskChunkHashes[i]==h) delta += L"(=disk)"; else { delta += L"(!disk)"; allDiskMatches=false; }
+            } else allDiskMatches=false;
         }
     }
 
     if (delta.empty())
         return false;
+
+    if(OblivionEye::Config::INTEGRITY_AUTO_WHITELIST_DISK_MATCH_DEFAULT && !modifiedIdx.empty() && allDiskMatches){
+        for(auto idx: modifiedIdx) IntegrityChunkWhitelist::Add(L"user32.dll", idx);
+        for(auto idx: modifiedIdx){ size_t off=idx*chunk; size_t len=(off+chunk<=size)?chunk:(size-off); m_chunkHashes[idx]=Hash64(base+off,len); }
+        m_baselineHash = current; Log(L"User32Integrity auto-whitelisted disk-matching chunks: "+delta); return false;
+    }
 
     EventReporter::SendDetection(L"User32Integrity", L"user32 .text modified chunks:" + delta);
     ShowDetectionAndExit(L"user32 integrity mismatch " + delta);

@@ -174,6 +174,8 @@
     <ClInclude Include="include\PrologHookChecker.h" />
     <ClInclude Include="include\PublisherWhitelist.h" />
     <ClInclude Include="include\RuntimeStats.h" />
+  <ClInclude Include="include\HashUtil.h" />
+  <ClInclude Include="include\SharedKey.h" />
     <ClInclude Include="include\Signatures.h" />
     <ClInclude Include="include\SignatureScanner.h" />
     <ClInclude Include="include\SignatureTrust.h" />
@@ -193,6 +195,7 @@
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">Create</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Create</PrecompiledHeader>
     </ClCompile>
+    <ClCompile Include="src\SelfCheck.cpp" />
     <ClCompile Include="src\AntiDebug.cpp" />
     <ClCompile Include="src\AntiInjection.cpp" />
     <ClCompile Include="src\AntiSuspend.cpp" />
@@ -227,6 +230,8 @@
     <ClCompile Include="src\PrologHookChecker.cpp" />
     <ClCompile Include="src\PublisherWhitelist.cpp" />
     <ClCompile Include="src\RuntimeStats.cpp" />
+  <ClCompile Include="src\HashUtil.cpp" />
+  <ClCompile Include="src\SharedKey.cpp" />
     <ClCompile Include="src\Signatures.cpp" />
     <ClCompile Include="src\SignatureScanner.cpp" />
     <ClCompile Include="src\SignatureTrust.cpp" />

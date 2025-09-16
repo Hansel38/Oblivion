@@ -21,13 +21,31 @@ void SendRaw(const std::string &line) {
 
 void SendDetection(const std::wstring &feature, const std::wstring &detail) {
     RuntimeStats::Instance().IncDetection();
-    SendRaw(OblivionEye::StringUtil::WideToUtf8(OblivionEye::LogTags::DETECTION) + "|" + WToUtf8(feature) + "|" + WToUtf8(detail));
+    auto feat = Sanitize(WToUtf8(feature));
+    auto det  = Sanitize(WToUtf8(detail));
+    SendRaw(OblivionEye::StringUtil::WideToUtf8(OblivionEye::LogTags::DETECTION) + "|" + feat + "|" + det);
 }
 
 void SendInfo(const std::wstring &tag, const std::wstring &detail) {
     RuntimeStats::Instance().IncInfo();
     if (tag == L"Heartbeat") RuntimeStats::Instance().IncHeartbeat();
-    SendRaw(OblivionEye::StringUtil::WideToUtf8(OblivionEye::LogTags::INFO) + "|" + OblivionEye::StringUtil::WideToUtf8(tag) + "|" + OblivionEye::StringUtil::WideToUtf8(detail));
+    auto t = Sanitize(WToUtf8(tag));
+    auto d = Sanitize(WToUtf8(detail));
+    SendRaw(OblivionEye::StringUtil::WideToUtf8(OblivionEye::LogTags::INFO) + "|" + t + "|" + d);
+}
+
+std::string Sanitize(const std::string &s) {
+    std::string out; out.reserve(s.size());
+    for(char c : s) {
+        switch(c) {
+            case '\n': case '\r': out.push_back(' '); break; // normalize newlines
+            case '|': out.append("\\u007C"); break;          // escape delimiter
+            default:
+                // control chars below 0x20 -> space
+                if (static_cast<unsigned char>(c) < 0x20) out.push_back(' '); else out.push_back(c);
+        }
+    }
+    return out;
 }
 }
 }

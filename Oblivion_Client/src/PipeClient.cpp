@@ -10,10 +10,16 @@
 #include <iomanip>
 #include "../include/Config.h"
 #include "../include/StringUtil.h"
+#include "../include/SharedKey.h"
+#include "../include/HashUtil.h"
+#include <wincrypt.h>
+#include <bcrypt.h>
+#pragma comment(lib, "bcrypt.lib")
 
 namespace OblivionEye {
 
     static HANDLE g_hPipe = INVALID_HANDLE_VALUE;
+    static bool   g_authenticated = false; // set true after handshake success
     static std::mutex g_qMtx;
     static std::queue<std::string> g_queue;
 
@@ -69,12 +75,22 @@ namespace OblivionEye {
     }
 
     std::string PipeClient::BuildPacket(const std::string& payloadUtf8) {
-        // Layout (ascii): NONCE=xxxxxxxx;DATA=<obf bytes>
+        // Sequence number (monotonic) appended into plain segment BEFORE HMAC so HMAC covers it.
+        uint64_t seq = m_seqCounter.fetch_add(1, std::memory_order_relaxed);
+        std::ostringstream base;
+        base << payloadUtf8 << "|SEQ=" << seq; // Always add SEQ (even if HMAC disabled) for future diagnostics
+        std::string plain = base.str();
+        // HMAC opsional atas payload plain (pre-CRC, pre-XOR): H = SHA256(key + plain)
+        if (m_hmacEnabled) {
+            auto key = SharedKeyManager::Instance().GetUtf8();
+            auto hmac = HashUtil::Sha256HexLower(key + plain);
+            if (!hmac.empty()) plain += std::string("|H=") + hmac;
+        }
         uint32_t nonce = m_nonceCounter.fetch_add(1, std::memory_order_relaxed);
-        std::string msg = AppendCrcIfEnabled(payloadUtf8);
-        std::string obf = m_rollingXor ? ApplyRollingXor(msg, m_xorKey, nonce) : msg;
+        std::string withCrc = AppendCrcIfEnabled(plain);
+        std::string transformed = m_rollingXor ? ApplyRollingXor(withCrc, m_xorKey, nonce) : withCrc;
         std::ostringstream oss;
-        oss << "NONCE=" << std::hex << std::setw(8) << std::setfill('0') << nonce << ";" << obf;
+        oss << "NONCE=" << std::hex << std::setw(8) << std::setfill('0') << nonce << ";" << transformed;
         return oss.str();
     }
 
@@ -95,13 +111,57 @@ namespace OblivionEye {
         }
     }
 
+    // HashUtil dipakai untuk SHA-256 (lihat HashUtil.h)
+
     void PipeClient::EnsureConnected() {
-        if (g_hPipe != INVALID_HANDLE_VALUE) return;
-        g_hPipe = CreateFileW(m_pipeName.c_str(), GENERIC_WRITE, 0, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+        if (g_hPipe != INVALID_HANDLE_VALUE && g_authenticated) return;
         if (g_hPipe == INVALID_HANDLE_VALUE) {
-            // retry nanti
-        } else {
-            Log(L"PipeClient connected");
+            g_hPipe = CreateFileW(m_pipeName.c_str(), GENERIC_WRITE | GENERIC_READ, 0, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+            if (g_hPipe == INVALID_HANDLE_VALUE) return; // retry nanti
+            Log(L"PipeClient connected (handshake pending)");
+            g_authenticated = false;
+        }
+        if (!g_authenticated) {
+            // Prepare client nonce & send HELLO
+            unsigned long long nonceCli = 0;
+            if(BCryptGenRandom(nullptr,(PUCHAR)&nonceCli,sizeof(nonceCli),BCRYPT_USE_SYSTEM_PREFERRED_RNG)!=0) {
+                nonceCli = GetTickCount64() ^ (uintptr_t)this; // fallback
+            }
+            std::ostringstream hello; hello << "HELLO " << std::hex << nonceCli << "\n";
+            DWORD written=0; WriteFile(g_hPipe, hello.str().c_str(), (DWORD)hello.str().size(), &written, nullptr);
+            // Read CHALLENGE line
+            std::string line; char ch; DWORD read=0; BOOL okB;
+            DWORD start = GetTickCount();
+            while(GetTickCount() - start < Config::PIPE_HANDSHAKE_TIMEOUT_MS) {
+                okB = ReadFile(g_hPipe,&ch,1,&read,nullptr);
+                if(!okB || read==0){ std::this_thread::sleep_for(std::chrono::milliseconds(10)); continue; }
+                if(ch=='\n') break; else line.push_back(ch);
+            }
+            if(line.rfind("CHALLENGE ",0)!=0){ ClosePipe(); return; }
+            std::string nonceSrvHex = line.substr(10);
+            std::ostringstream nc; nc<<std::hex<<nonceCli; std::string nonceCliHex = nc.str();
+            std::string keyUtf8 = SharedKeyManager::Instance().GetUtf8();
+            std::string digest = HashUtil::Sha256HexLower(keyUtf8 + nonceCliHex + nonceSrvHex);
+            std::string authLine = std::string("AUTH ") + digest + "\n";
+            WriteFile(g_hPipe, authLine.c_str(), (DWORD)authLine.size(), &written, nullptr);
+            // Await OK/FAIL
+            line.clear(); start = GetTickCount();
+            while(GetTickCount() - start < Config::PIPE_HANDSHAKE_TIMEOUT_MS) {
+                okB = ReadFile(g_hPipe,&ch,1,&read,nullptr);
+                if(!okB || read==0){ std::this_thread::sleep_for(std::chrono::milliseconds(10)); continue; }
+                if(ch=='\n') break; else line.push_back(ch);
+            }
+            if(line == "OK" || line == "OK HMAC") {
+                g_authenticated = true;
+                if(line == "OK HMAC") {
+                    // Auto-enable HMAC if server mandates it
+                    m_hmacEnabled = true;
+                    Log(L"PipeClient handshake OK (HMAC enforced)");
+                } else {
+                    Log(L"PipeClient handshake OK");
+                }
+            }
+            else { ClosePipe(); }
         }
     }
 
@@ -109,7 +169,7 @@ namespace OblivionEye {
         Log(L"PipeClient start");
         while (m_running) {
             EnsureConnected();
-            if (g_hPipe == INVALID_HANDLE_VALUE) { std::this_thread::sleep_for(std::chrono::milliseconds(Config::PIPE_RECONNECT_MS)); continue; }
+            if (g_hPipe == INVALID_HANDLE_VALUE || !g_authenticated) { std::this_thread::sleep_for(std::chrono::milliseconds(Config::PIPE_RECONNECT_MS)); continue; }
             std::string msg;
             {
                 std::lock_guard<std::mutex> lk(g_qMtx);

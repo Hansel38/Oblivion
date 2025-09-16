@@ -23,6 +23,10 @@
 #include <sstream>
 #include <deque>
 #include "../include/Signatures.h"
+#include "../include/SharedKey.h"
+#include "../include/HashUtil.h"
+#include <bcrypt.h>
+#pragma comment(lib, "bcrypt.lib")
 
 namespace OblivionEye {
     static HANDLE g_hCmdPipe = INVALID_HANDLE_VALUE;
@@ -45,6 +49,9 @@ namespace OblivionEye {
         if (typeUtf8.empty() || payload.empty()) return;
         PipeClient::Instance().Send("INFO|" + typeUtf8 + "|" + payload);
     }
+
+    static bool g_handshakeStrict = Config::PIPE_HANDSHAKE_STRICT_DEFAULT;
+    static std::deque<DWORD> g_failTicks; // timestamps gagal handshake
 
     void PipeCommandClient::HandleCommandLine(const std::string& line) {
     static std::deque<DWORD> recentTicks; static DWORD windowMs=Config::CMD_WINDOW_MS; DWORD now = GetTickCount();
@@ -94,6 +101,11 @@ namespace OblivionEye {
         else if (cmd == "PROLOG_REBASELINE") { PrologHookChecker::Instance().Rebaseline(); }
         else if (cmd == "PROLOG_LIST") { auto targets = PrologHookChecker::Instance().GetTargets(); SendUtf8(L"PROLOG", L"BEGIN_PROLOG_LIST count=" + std::to_wstring(targets.size())); for (auto& t : targets) { std::wstring lineW = t.module + L" " + std::wstring(t.function.begin(), t.function.end()) + L" " + std::to_wstring(t.minBytes); SendUtf8(L"PROLOG", lineW); } SendUtf8(L"PROLOG", L"END_PROLOG_LIST"); }
         else if (cmd == "PIPE_SET_XOR_KEY") { unsigned int k=0; iss>>std::hex>>k; if(k<=0xFF) PipeClient::Instance().RotateXorKey((uint8_t)k,true); }
+        else if (cmd == "PIPE_SET_SHARED_KEY") { std::string rest; getline(iss,rest); if(!rest.empty()&&rest[0]==' ') rest.erase(0,1); if(!rest.empty()) { SharedKeyManager::Instance().SetFromUtf8(rest); SendUtf8(L"RESULT", L"PIPE_SET_SHARED_KEY OK"); } }
+        else if (cmd == "PIPE_HANDSHAKE_STRICT_ON") { g_handshakeStrict = true; SendUtf8(L"RESULT", L"PIPE_HANDSHAKE_STRICT_ON OK"); }
+        else if (cmd == "PIPE_HANDSHAKE_STRICT_OFF") { g_handshakeStrict = false; SendUtf8(L"RESULT", L"PIPE_HANDSHAKE_STRICT_OFF OK"); }
+        else if (cmd == "PIPE_HMAC_ON") { PipeClient::Instance().SetHmacEnabled(true); SendUtf8(L"RESULT", L"PIPE_HMAC_ON OK"); }
+        else if (cmd == "PIPE_HMAC_OFF") { PipeClient::Instance().SetHmacEnabled(false); SendUtf8(L"RESULT", L"PIPE_HMAC_OFF OK"); }
         else if (cmd == "HEARTBEAT_ADAPTIVE_ON") { Heartbeat::Instance().EnableAdaptive(true); }
         else if (cmd == "HEARTBEAT_ADAPTIVE_OFF") { Heartbeat::Instance().EnableAdaptive(false); }
         else if (cmd == "PIPE_SET_CRC_ON") { PipeClient::Instance().SetCrcEnabled(true); }
@@ -163,5 +175,78 @@ namespace OblivionEye {
     else if (cmd == "GET_STATUS") { auto snap = RuntimeStats::Instance().GetSnapshot(); auto profiles = DetectorScheduler::Instance().GetProfiles(); std::wstring w = L"detections=" + std::to_wstring(snap.detections) + L" info=" + std::to_wstring(snap.infoEvents) + L" heartbeats=" + std::to_wstring(snap.heartbeats) + L" uptime_sec=" + std::to_wstring(snap.lastUptimeSec); w += L" profiler="; size_t shown=0; for (size_t i=0;i<profiles.size();++i){ if (profiles[i].runCount==0) continue; if(shown) w+=L","; w += profiles[i].name + L":" + std::to_wstring((int)profiles[i].avgDurationMs) + L"ms"; if(++shown>=10) break; } SendUtf8(L"STATUS", w); }
     }
 
-    void PipeCommandClient::WorkerLoop() { Log(L"PipeCommandClient start"); char buffer[OblivionEye::Config::PIPE_CMD_BUFFER]; while (m_running) { EnsureConnected(); if (g_hCmdPipe == INVALID_HANDLE_VALUE) { std::this_thread::sleep_for(std::chrono::milliseconds(1000)); continue; } DWORD read=0; BOOL ok=ReadFile(g_hCmdPipe, buffer, sizeof(buffer)-1, &read, nullptr); if (!ok || read==0) { ClosePipe(); std::this_thread::sleep_for(std::chrono::milliseconds(500)); continue; } buffer[read]='\0'; HandleCommandLine(std::string(buffer)); } ClosePipe(); Log(L"PipeCommandClient stop"); }
+    // Server-side SHA256 now uses unified HashUtil (CNG backend)
+    static std::string Sha256AsciiSrv(const std::string &src) { return HashUtil::Sha256HexLower(src); }
+
+    void PipeCommandClient::WorkerLoop() {
+        Log(L"PipeCommandClient start");
+        char buffer[OblivionEye::Config::PIPE_CMD_BUFFER];
+        while (m_running) {
+            EnsureConnected();
+            if (g_hCmdPipe == INVALID_HANDLE_VALUE) { std::this_thread::sleep_for(std::chrono::milliseconds(1000)); continue; }
+            // Perform handshake if first read begins with HELLO (new client) else treat as legacy command.
+            std::string line; char ch; DWORD read=0; BOOL okB; bool authed=false; bool legacy=false; DWORD start = GetTickCount();
+            // Peek first line
+            while(GetTickCount() - start < Config::PIPE_HANDSHAKE_TIMEOUT_MS) {
+                okB = ReadFile(g_hCmdPipe,&ch,1,&read,nullptr);
+                if(!okB || read==0){ std::this_thread::sleep_for(std::chrono::milliseconds(10)); continue; }
+                if(ch=='\n') break; else line.push_back(ch);
+                if(line.size() > 1024) break; // sanity
+            }
+            if(line.rfind("HELLO ",0)==0) {
+                std::string nonceCliHex = line.substr(6);
+                unsigned long long nonceSrv = 0;
+                if(BCryptGenRandom(nullptr,(PUCHAR)&nonceSrv,sizeof(nonceSrv),BCRYPT_USE_SYSTEM_PREFERRED_RNG)!=0) {
+                    nonceSrv = ((unsigned long long)GetTickCount64() << 16) ^ (uintptr_t)g_hCmdPipe; // fallback
+                }
+                std::ostringstream ns; ns<<std::hex<<nonceSrv; std::string nonceSrvHex = ns.str();
+                std::string challenge = std::string("CHALLENGE ")+nonceSrvHex+"\n"; DWORD w=0; WriteFile(g_hCmdPipe, challenge.c_str(), (DWORD)challenge.size(), &w, nullptr);
+                // Await AUTH
+                line.clear(); start = GetTickCount();
+                while(GetTickCount() - start < Config::PIPE_HANDSHAKE_TIMEOUT_MS) {
+                    okB = ReadFile(g_hCmdPipe,&ch,1,&read,nullptr);
+                    if(!okB || read==0){ std::this_thread::sleep_for(std::chrono::milliseconds(10)); continue; }
+                    if(ch=='\n') break; else line.push_back(ch);
+                    if(line.size() > 256) break;
+                }
+                if(line.rfind("AUTH ",0)==0) {
+                    std::string digest = line.substr(5);
+                    std::string keyUtf8 = SharedKeyManager::Instance().GetUtf8();
+                    std::string expected = HashUtil::Sha256HexLower(keyUtf8 + nonceCliHex + nonceSrvHex);
+                    if(digest == expected) { authed=true; std::string ok="OK\n"; WriteFile(g_hCmdPipe, ok.c_str(), (DWORD)ok.size(), &w, nullptr); Log(L"PipeCommandClient authenticated"); }
+                }
+                if(!authed) {
+                    std::string fail="FAIL\n"; DWORD fw=0; WriteFile(g_hCmdPipe, fail.c_str(), (DWORD)fail.size(), &fw, nullptr);
+                    // catat gagal
+                    DWORD nowTick = GetTickCount();
+                    g_failTicks.push_back(nowTick);
+                    while(!g_failTicks.empty() && nowTick - g_failTicks.front() > Config::PIPE_HANDSHAKE_FAIL_WINDOW_MS) g_failTicks.pop_front();
+                    bool penalize = g_failTicks.size() >= Config::PIPE_HANDSHAKE_FAIL_MAX;
+                    ClosePipe();
+                    std::this_thread::sleep_for(std::chrono::milliseconds(penalize ? Config::PIPE_HANDSHAKE_PENALTY_MS : 500));
+                    continue; }
+            } else {
+                if (g_handshakeStrict) {
+                    // strict mode: wajib HELLO
+                    DWORD nowTick = GetTickCount(); g_failTicks.push_back(nowTick);
+                    while(!g_failTicks.empty() && nowTick - g_failTicks.front() > Config::PIPE_HANDSHAKE_FAIL_WINDOW_MS) g_failTicks.pop_front();
+                    bool penalize = g_failTicks.size() >= Config::PIPE_HANDSHAKE_FAIL_MAX;
+                    ClosePipe(); std::this_thread::sleep_for(std::chrono::milliseconds(penalize? Config::PIPE_HANDSHAKE_PENALTY_MS: 500));
+                    continue;
+                } else {
+                    // Legacy client: treat captured line as command (if any)
+                    legacy = true; authed = true; if(!line.empty()) HandleCommandLine(line);
+                }
+            }
+            // After authentication, proceed reading remaining commands
+            while (m_running) {
+                DWORD read2=0; BOOL ok=ReadFile(g_hCmdPipe, buffer, sizeof(buffer)-1, &read2, nullptr);
+                if (!ok || read2==0) { ClosePipe(); std::this_thread::sleep_for(std::chrono::milliseconds(500)); break; }
+                buffer[read2]='\0';
+                HandleCommandLine(std::string(buffer));
+            }
+        }
+        ClosePipe();
+        Log(L"PipeCommandClient stop");
+    }
 }

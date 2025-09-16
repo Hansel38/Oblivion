@@ -2,6 +2,7 @@
 #include <string>
 #include <atomic>
 #include <cstdint>
+#include "Config.h" // for Config::PIPE_HMAC_DEFAULT_ENABLED
 
 namespace OblivionEye {
     class PipeClient {
@@ -16,6 +17,8 @@ namespace OblivionEye {
         void SetCrcEnabled(bool e) { m_crcEnabled = e; }
         void SetRollingXorEnabled(bool e) { m_rollingXor = e; }
         void RotateXorKey(uint8_t newKey, bool resetNonce = true) { m_xorKey = newKey; if (resetNonce) m_nonceCounter = 1; }
+    void SetHmacEnabled(bool e) { m_hmacEnabled = e; }
+    bool IsHmacEnabled() const { return m_hmacEnabled; }
     private:
         PipeClient() = default;
         void WorkerLoop();
@@ -31,6 +34,8 @@ namespace OblivionEye {
         uint8_t m_xorKey = 0; // base key
         bool m_crcEnabled = false;
         bool m_rollingXor = false;
-        std::atomic<uint32_t> m_nonceCounter{ 1 };
+    std::atomic<uint32_t> m_nonceCounter{ 1 };
+    std::atomic<uint64_t> m_seqCounter{ 0 }; // monotonic sequence (for ordering + anti-replay extension)
+        bool m_hmacEnabled = Config::PIPE_HMAC_DEFAULT_ENABLED;
     };
 }

@@ -33,6 +33,10 @@
 #include "include/TestModeSpoofChecker.h"
 #include "include/ThreadRegistry.h"
 #include "include/User32Integrity.h"
+#include "include/SelfCheck.h"
+#include "include/ModuleSectionIntegrity.h"
+#include "include/KernelSurfaceStub.h"
+#include "include/MemoryHeuristics.h"
 
 #include <mutex>
 
@@ -64,6 +68,16 @@ namespace OblivionEye {
             sched.Add(&TestModeSpoofChecker::Instance());
             sched.Add(&EATHookChecker::Instance());
             sched.Add(&SyscallStubChecker::Instance());
+            sched.Add(&KernelSurfaceStub::Instance());
+            sched.Add(&MemoryHeuristics::Instance());
+            // New phase: aggregate section integrity across core modules (ntdll, kernel32, user32)
+            struct ModuleSectionIntegrityAdapter : IDetector {
+                const wchar_t* Name() const override { return L"ModuleSectionIntegrity"; }
+                unsigned IntervalMs() const override { return OblivionEye::Config::MEM_SEC_INTEGRITY_INTERVAL_MS; }
+                void Tick() override { ModuleSectionIntegrity::Instance().Tick(); }
+            };
+            static ModuleSectionIntegrityAdapter g_modSecInt;
+            sched.Add(&g_modSecInt);
             sched.Start();
             Log(L"Detector registration completed (once)");
         });
@@ -94,6 +108,13 @@ namespace OblivionEye {
         LoadPolicySafe();
         ProcessWatcher::Instance().Start();
         RegisterTickDetectorsOnce();
+        // Optional internal self-check triggered via environment variable OBLIVION_SELFTEST=1
+        wchar_t val[8]; DWORD got = GetEnvironmentVariableW(L"OBLIVION_SELFTEST", val, 8);
+        if(got>0 && got < 8 && val[0]==L'1') {
+            auto report = RunInternalSelfCheck();
+            // Log first line only (full report could be large); optionally could send through pipe
+            LogSec(L"SelfCheck invoked");
+        }
     }
 
     // Process-level shutdown
