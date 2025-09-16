@@ -13,5 +13,6 @@ namespace OblivionEye {
     bool IsWhitelisted(const std::wstring& moduleNameLower, size_t chunkIndex);
         void Clear();
         std::vector<std::pair<std::wstring, size_t>> GetAll();
+        size_t CountFor(const std::wstring& moduleNameLower); // new: count whitelisted chunks for module
     }
 }

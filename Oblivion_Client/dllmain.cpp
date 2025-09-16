@@ -37,6 +37,7 @@
 #include "include/ModuleSectionIntegrity.h"
 #include "include/KernelSurfaceStub.h"
 #include "include/MemoryHeuristics.h"
+#include "include/IntegrityExport.h"
 
 #include <mutex>
 
@@ -70,6 +71,14 @@ namespace OblivionEye {
             sched.Add(&SyscallStubChecker::Instance());
             sched.Add(&KernelSurfaceStub::Instance());
             sched.Add(&MemoryHeuristics::Instance());
+            // Integrity export periodic pusher (uses its own interval independent of scheduler adaptivity)
+            struct IntegrityExportAdapter : IDetector {
+                const wchar_t* Name() const override { return L"IntegrityExport"; }
+                unsigned IntervalMs() const override { return 1000; } // check every second; internal logic gates real sends
+                void Tick() override { IntegrityExport::Instance().Tick(); }
+            };
+            static IntegrityExportAdapter g_intExport;
+            sched.Add(&g_intExport);
             // New phase: aggregate section integrity across core modules (ntdll, kernel32, user32)
             struct ModuleSectionIntegrityAdapter : IDetector {
                 const wchar_t* Name() const override { return L"ModuleSectionIntegrity"; }

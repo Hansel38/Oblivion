@@ -279,6 +279,39 @@ Pembaharuan fokus meningkatkan baseline integrity mirip filosofi proteksi Gepard
 - `INTEGRITY_BASELINE_VERSION`
 - `INTEGRITY_AUTO_WHITELIST_DISK_MATCH_DEFAULT`
 
+### Perluasan Cakupan Integrity & Multi-Module HMAC (Kernel32 / User32 / Gdi32)
+
+Semua modul inti OS yang dimonitor kini konsisten memakai pipeline integrity yang sama:
+
+- Hashing: SHA-256 truncated 64-bit (`HashUtil::Sha256Trunc64`).
+- Chunking: Ukuran mengikuti `Config::CHUNK_SIZE` (seragam di semua modul).
+- Disk Cross-Check: Baseline menyimpan hash `.text` bersih per-chunk untuk anotasi `(=disk)` / `(!disk)` saat delta.
+- Auto-Whitelist Disk-Match: Jika SEMUA delta chunk cocok disk dan `INTEGRITY_AUTO_WHITELIST_DISK_MATCH_DEFAULT` true → otomatis di-whitelist + rebaseline (tanpa terminate) + telemetry counter meningkat (`awNtdll`, `awKernel32`, `awUser32`, `awGdi32`).
+- HMAC Persistence (Chained): `ntdll_baseline.txt`, `kernel32_baseline.txt`, `user32_baseline.txt`, `gdi32_baseline.txt` memakai format versi 2 (lihat di atas) dengan HMAC SHA-256 dan opsional previous-chain HMAC jika `INTEGRITY_CHAIN_BASELINE_DEFAULT` aktif.
+- Key Derivation Refactor: Semua modul sekarang memakai util bersama `IntegrityHmacUtil::BuildModuleKey` yang:
+  1. Merakit kunci obfuscated 32-byte.
+  2. Opsional XOR hash HWID (konfigurasi `INTEGRITY_HMAC_HWID_ENABLED_DEFAULT`).
+  3. Diversifikasi per modul (XOR nama modul) untuk meminimalkan korelasi antar baseline.
+- File Baseline: Disimpan di direktori kerja proses; mismatch HMAC → baseline diabaikan dan baseline fresh direcapture (mencegah poisoning sederhana).
+
+Format Baseline Versi 2 (semua modul):
+
+```text
+<version> <baselineHash> <chunkCount> <chunkHashes...> <diskHash> <diskChunkCount> <diskChunkHashes...> <hmacHex> [prevHmacHex]
+```
+
+Contoh (dipotong) `kernel32_baseline.txt`:
+
+```text
+2 123456789012345 128 <...128 angka...> 987654321012345 128 <...128 angka...> a1b2c3... (64 hex) d4e5f6...(64 hex optional)
+```
+
+Telemetry Tambahan:
+
+- Counter auto-whitelist per modul membantu audit patch OS vs anomali injeksi. Lonjakan tak biasa di satu modul → sinyal investigasi.
+
+Policy Shortcut: `mX-Y` tetap default ke `ntdll.dll`; gunakan bentuk eksplisit (`kernel32.dll m10-12`, `user32.dll m5-9`, `gdi32.dll m3-4`) untuk modul lain.
+
 ### Auto Disk-Match Whitelist
 
 Jika `INTEGRITY_AUTO_WHITELIST_DISK_MATCH_DEFAULT` = true, dan semua chunk yang berubah relatif terhadap baseline lama ternyata identik dengan salinan bersih di disk (`(=disk)`), maka:
@@ -289,6 +322,23 @@ Jika `INTEGRITY_AUTO_WHITELIST_DISK_MATCH_DEFAULT` = true, dan semua chunk yang 
 4. Gunakan bersama `MODSEC_AUDIT=1` untuk fase kalibrasi patch OS → aktifkan flag → jalankan game → kumpulkan log → setelah stabil simpan whitelist permanen via policy (future parser range support).
 
 Keamanan: hanya berlaku jika SEMUA deltas bernilai `(=disk)`. Jika ada satu chunk yang tidak cocok disk (`(!disk)`), proses deteksi normal tetap berjalan.
+
+### Whitelist Chunk Range Syntax (Policy)
+
+Section `[chunk_whitelist]` kini mendukung variasi:
+
+1. `ntdll.dll 12` → single chunk (format legacy tetap berlaku)
+2. `ntdll.dll 12-18` → range inklusif
+3. `ntdll.dll m12-18` → alternatif prefiks `m` (menegaskan “chunk”)
+4. `user32.dll:m4-9` → inline modul + token `m`
+5. `m10-20` → shortcut modul default `ntdll.dll` (heuristik umum patch Windows)
+6. `user32.dll:m7` → single chunk via token
+
+Catatan:
+
+- Rentang otomatis digabung (interval merging) sehingga input tumpang tindih jadi satu interval.
+- Output penyimpanan policy saat ini tetap melakukan enumerasi setiap chunk (optimisasi future: persist bentuk range).
+- Batas enumerasi ekspor saat ini: maks 1024 item per interval saat serialisasi `GetAll()` (untuk mencegah dump raksasa tidak perlu).
 
 ### Audit Mode Cepat
 
@@ -305,10 +355,10 @@ Semua detection akan tetap dipublish (dengan label `(AUDIT)`), tetapi proses tid
 
 ### Rencana Lanjutan
 
-- Ekstensi disk cross-check ke `kernel32.dll`, `gdi32.dll`.
-- Policy syntax `[chunk_whitelist_range] module start end` (pending parser update).
+- Policy syntax ring-kompresi whitelist (persist bentuk range langsung).
 - Driver kernel: snapshot SSDT + verifikasi PEB pointer chain -> disuplai ke `KernelSurfaceStub` untuk perbandingan silang.
-- Replay mitigasi tetap bergantung pada nonce unik; HMAC tidak sendiri mencegah replay tanpa nonce guard (yang sudah aktif).
+- Ekstensi heuristik memory: marking halaman JIT + analitik transisi proteksi.
+- Replay mitigasi lanjutan: binding sequence + time window adaptif (sudah sebagian dengan SEQ + NONCE, bisa diperketat).
 
 Roadmap Opsional:
 
@@ -749,20 +799,252 @@ Karakteristik:
 
 Manfaat:
 
+## Integrity Control-Plane Commands (Runtime Telemetry & Maintenance)
+
+Empat modul inti OS yang dimonitor (`ntdll.dll`, `kernel32.dll`, `user32.dll`, `gdi32.dll`) kini memiliki command operasi untuk inspeksi status integritas, rebaseline manual, dan verifikasi on-demand tanpa menunggu interval scheduler.
+
+### Ringkasan Command
+
+| Command | Deskripsi | Argumen | Output Utama |
+|---------|-----------|---------|--------------|
+| `INTEGRITY_STATUS` | Status ringkas seluruh modul (plain text) | - | Line tunggal per semua modul disatukan |
+| `INTEGRITY_STATUS_JSON` | Status terstruktur (JSON satu line) | - | Objek JSON berisi 4 key modul |
+| `INTEGRITY_REBASELINE <mod\|ALL>` | Paksa tangkap baseline baru (manual) | Nama modul atau ALL | `RESULT` per modul OK/FAIL |
+| `INTEGRITY_VERIFY <mod\|ALL>` | Hash `.text` saat ini vs baseline (tanpa rebaseline) | Nama modul atau ALL | `RESULT` per modul OK/FAIL |
+
+Modul bisa disebut dengan / tanpa `.dll` (otomatis ditambah). `ALL` menjalankan perintah keempat modul berurutan.
+
+### Field Telemetry per Modul
+
+Field yang diekspor di `INTEGRITY_STATUS_JSON` (semua numerik kecuali timestamp):
+
+| Field | Arti |
+|-------|------|
+| `baselineLoadsOk` | Jumlah load / capture baseline sukses (persisted atau fresh) |
+| `hmacMismatch` | Baseline dibuang karena HMAC tidak cocok (indikasi tamper) |
+| `rebaselineCount` | Total baseline baru (manual + auto whitelist) |
+| `manualRebaselineCount` | Subset rebaseline yang dipicu operator (`INTEGRITY_REBASELINE`) |
+| `chainAdvanceCount` | Jumlah kali HMAC lama dipindah ke rantai (chained baseline) |
+| `autoWhitelistCount` | Auto rebaseline karena seluruh delta chunk = disk bersih |
+| `verifyNowRequests` | Panggilan `INTEGRITY_VERIFY` |
+| `forceVerifyFailures` | Verifikasi on-demand gagal (mismatch) |
+| `totalChunks` | Jumlah chunk `.text` pada baseline terbaru |
+| `whitelistedChunks` | Snapshot banyak chunk di whitelist runtime |
+| `hmacValid` | 1 bila baseline aktif lulus verifikasi HMAC |
+| `chainDepth` | Panjang rantai HMAC (1 = hanya current, 2 = current+prev) |
+| `lastBaselineTime` | ISO8601 UTC baseline / rebaseline terakhir (manual / auto) |
+| `lastAutoWhitelistTime` | Waktu terakhir auto-whitelist rebaseline |
+| `lastManualRebaselineTime` | Waktu terakhir perintah manual rebaseline |
+
+Nilai timestamp bisa kosong (`""`) bila belum pernah terjadi event terkait.
+
+### Contoh Output
+
+Plain text (`INTEGRITY_STATUS`):
+
+```text
+ntdll.dll bl=3 hm=0 rb=2 (man=1) aw=1 vfy=4 vfFail=0 wl=12/128 hmac=OK chain=2 | kernel32.dll bl=3 hm=0 rb=1 (man=0) aw=1 vfy=2 vfFail=0 wl=5/96 hmac=OK chain=1 | user32.dll bl=2 hm=0 rb=1 (man=1) aw=0 vfy=1 vfFail=0 wl=0/110 hmac=OK chain=1 | gdi32.dll bl=2 hm=0 rb=1 (man=0) aw=1 vfy=1 vfFail=0 wl=0/104 hmac=OK chain=1
+```
+
+JSON (`INTEGRITY_STATUS_JSON` diringkas, satu line real):
+
+```json
+{"ntdll.dll":{"baselineLoadsOk":3,"hmacMismatch":0,"rebaselineCount":2,"manualRebaselineCount":1,"chainAdvanceCount":1,"autoWhitelistCount":1,"verifyNowRequests":4,"forceVerifyFailures":0,"totalChunks":128,"whitelistedChunks":12,"hmacValid":1,"chainDepth":2,"lastBaselineTime":"2025-09-16T12:34:10Z","lastAutoWhitelistTime":"2025-09-16T12:33:50Z","lastManualRebaselineTime":"2025-09-16T12:34:10Z"},"kernel32.dll":{...},"user32.dll":{...},"gdi32.dll":{...}}
+```
+
+### Rebaseline Manual vs Auto-Whitelist
+
+- Manual (`INTEGRITY_REBASELINE`) selalu meningkatkan `manualRebaselineCount` dan mengisi `lastManualRebaselineTime`.
+- Auto rebaseline hanya terjadi jika SEMUA delta chunk yang bukan whitelist cocok dengan hash chunk disk `(=disk)`. Jika satu saja `(!disk)`, proses detection normal (exit) berjalan.
+- Keduanya meningkatkan `rebaselineCount` dan memperbarui `lastBaselineTime`.
+
+### Chained Baseline
+
+Jika `INTEGRITY_CHAIN_BASELINE_DEFAULT` aktif dan baseline lama memiliki HMAC valid, HMAC lama disalin sebagai `prevChain` saat baseline baru dibuat. Ini menambah lineage sehingga injeksi baseline baru tanpa jejak lebih sulit.
+
+`chainDepth` = 1 berarti hanya baseline aktif; =2 berarti baseline saat ini + satu link sebelumnya (implementasi saat ini tidak menyimpan lebih dari 1 link historis untuk footprint ringkas).
+
+### Verifikasi On-Demand
+
+`INTEGRITY_VERIFY <mod>` menghitung hash `.text` modul saat ini dan membandingkan dengan baseline tanpa memicu rebaseline. Kegagalan (mismatch) menambah `forceVerifyFailures` (indikasi potensi racing patch / injeksi) – keputusan lanjutan (terminate / escalate) dapat dihubungkan ke pipeline detection lain.
+
+### Pola Operasional Disarankan
+
+1. Setelah patch Windows → jalankan klien dengan `MODSEC_AUDIT=1` beberapa menit.
+2. Pantau `INTEGRITY_STATUS_JSON` untuk modul dengan `autoWhitelistCount` bertambah.
+3. Review delta log awal (jika ada) → persist whitelist range ke policy permanen bila stabil.
+4. Jalankan `INTEGRITY_REBASELINE ALL` untuk menutup chain dan memperbarui timestamp.
+5. Kembali ke mode normal (tanpa `MODSEC_AUDIT`).
+
+### Failure Handling & Hints
+
+- `hmacMismatch > 0` segera investigasi: baseline file bisa rusak / dimodifikasi.
+- `forceVerifyFailures` bertambah tanpa rebaseline sah → indikator race benign vs malicious patch; pertimbangkan memperketat interval check atau escalate ke kill.
+- `whitelistedChunks/totalChunks` terlalu besar (misal >25%) → evaluasi ulang whitelist; potensi over-whitelisting menurunkan sensitivitas.
+
+### Keamanan
+
+- Jangan jalankan `INTEGRITY_REBASELINE` sembarang di environment produksi tanpa audit log; baseline poisoning bisa menyembunyikan patch injeksi sementara.
+- Gunakan chaining + HMAC HWID untuk mitigasi baseline copy-replay antar mesin.
+
+### Roadmap Integrity Control-Plane
+
+| Item | Status | Catatan |
+|------|--------|---------|
+| Export manual rebaseline reason | Planned | Argumen opsional di command |
+| Multi-link chain >2 | Planned | Perlu format baseline v3 |
+| Policy persist baseline HMAC | Exploratory | Untuk offline attestation |
+| Server side integrity mirror | Planned | Kirim status periodik ke server pusat |
+| Built-in telemetry export (TCP) | Selesai (basic) | `INTSTAT\|{...}` push via TcpClient |
+
+Dengan command ini operasional anti-cheat dapat melakukan inspeksi cepat & tindakan korektif tanpa rebuild / redeploy.
+
+### Telemetry Export (Central Server Push)
+
+Fitur opsional untuk mengirim snapshot JSON integritas ke server pusat secara periodik memakai koneksi TCP bawaan (`TcpClient`).
+
+Format frame terbaru (sementara plaintext):
+
+```text
+INTSTAT|sid=<32hex>|seq=<n>|{jsonSnapshot}[|X=<hmacHex64>|ALG=hmac256]\n
+```
+
+Keterangan:
+
+- `sid` : 128-bit random (hex 32) di-generate sekali per sesi eksport.
+- `seq` : counter increment per frame (mulai dari 1). Dipakai server untuk deteksi out-of-order / replay.
+- Bagian JSON sama dengan output `INTEGRITY_STATUS_JSON` (empat modul sebagai key).
+- HMAC opsional: `X=` berisi HMAC-SHA256 (64 lowercase hex) atas seluruh payload sebelum `|X=` (termasuk sid & seq). Tag algoritma saat ini `ALG=hmac256`.
+
+Aktivasi Runtime:
+
+```text
+INTEGRITY_EXPORT_ON
+INTEGRITY_EXPORT_INTERVAL 15000   # ms
+INTEGRITY_EXPORT_NOW              # push segera (tidak mempengaruhi jadwal berikutnya)
+INTEGRITY_EXPORT_OFF
+INTEGRITY_EXPORT_STATUS           # tampilkan state & interval
+TCP_CLIENT_START 203.0.113.10 9000
+TCP_CLIENT_STOP
+```
+
+Konstanta:
+
+| Konstanta | Default | Deskripsi |
+|-----------|---------|-----------|
+| `INTEGRITY_EXPORT_ENABLED_DEFAULT` | false | Auto aktif awal jika true |
+| `INTEGRITY_EXPORT_INTERVAL_MS_DEFAULT` | 15000 | Interval push default (ms) |
+| `INTEGRITY_EXPORT_MAX_JSON` | 2048 | Batas panjang snapshot dipotong |
+| `INTEGRITY_EXPORT_HMAC_ENABLED_DEFAULT` | false | Aktifkan penambahan `\|X=<hmac64>\|ALG=hmac256` |
+| `INTEGRITY_EXPORT_HMAC_REQUIRE_DEFAULT` | false | Wajibkan frame memiliki `\|X=` (kalau gagal generate: frame dibatalkan) |
+| `INTEGRITY_EXPORT_TLS_ENABLED_DEFAULT` | false | Placeholder untuk future TLS |
+
+Catatan Implementasi:
+
+- Adapter detector `IntegrityExport` di scheduler memanggil `Tick()` tiap 1s; hanya mengirim bila interval terlampaui & fitur enabled.
+- JSON isi identik struktur dengan `INTEGRITY_STATUS_JSON` (field sama) sehingga backend bisa reuse parser.
+- Payload dipotong bila melebihi batas (fail-safe agar tidak flood karena bug penambahan field besar).
+- Koneksi TCP harus sudah diinisialisasi via `TcpClient::Start()` (pastikan host/port dipanggil dari integrasi Anda—placeholder belum ditambahkan per sample ini bila host dinamis).
+
+Integrasi Backend:
+
+1. Listeni newline-delimited frames.
+2. Filter prefix `INTSTAT|` (abaikan baris lain seperti log biasa).
+3. Parse sisa sebagai JSON; index per modul.
+4. Alert jika `hmacMismatch > 0` atau lonjakan tiba-tiba `autoWhitelistCount`.
+
+Roadmap Lanjutan (update):
+
+| Fitur | Status | Catatan |
+|-------|--------|---------|
+| Transport control via commands | Selesai | START/STOP, interval, status |
+| HMAC-SHA256 envelope | Selesai | CNG HMAC 64 hex + ALG tag |
+| Session id + sequence | Selesai | Anti replay / korelasi server |
+| Key rotation manual & interval | Selesai | Random 32B → hex 64 |
+| TLS / mTLS koneksi telemetry | Skeleton | Abstraksi siap (transport interface) |
+| Delta-only snapshot | Planned | Optimisasi bandwidth |
+| Buffering offline & resend | Planned | Saat koneksi drop |
+| Compression (opsional) | Planned | Setelah TLS (negotiation) |
+| Server side anomaly scoring | Planned | Sequence gap / hmac fail weighting |
+| Multi-endpoint failover | Planned | Redundansi collector |
+
+#### HMAC Envelope
+
+Implementasi saat ini: HMAC-SHA256 (Windows CNG) atas substring sebelum `|X=` (seluruh header + JSON). Hasil 32 byte → 64 hex lowercase.
+
+Fallback: Jika HMAC gagal (misal CNG error) dan `require=OFF`, akan fallback ke truncated hash lemah dengan `ALG=weak`. Jika `require=ON`, frame dibatalkan dan error di-log.
+
+Contoh frame:
+
+```text
+INTSTAT|sid=3e7f4a2d9b6c412e8d90bc7711fa55d1|seq=5|{"ntdll.dll":{"baselineLoadsOk":1,...}}|X=2f0d9a2a...c5d0|ALG=hmac256
+```
+
+Runtime Commands (export & security):
+
+```text
+INTEGRITY_EXPORT_ON
+INTEGRITY_EXPORT_OFF
+INTEGRITY_EXPORT_INTERVAL <ms>
+INTEGRITY_EXPORT_NOW
+INTEGRITY_EXPORT_STATUS                # tampilkan interval, hmac on/off, require, rotasi
+INTEGRITY_EXPORT_SET_KEY <utf8_key>    # set manual key (plaintext utf8)
+INTEGRITY_EXPORT_ROTATE_KEY            # generate random 32B → hex 64 dan pakai segera
+INTEGRITY_EXPORT_ROTATE_INTERVAL <ms>  # auto-rotate periodik (>=1000ms; 0 untuk off)
+INTEGRITY_EXPORT_HMAC_ON / OFF
+INTEGRITY_EXPORT_HMAC_REQUIRE_ON / OFF
+INTEGRITY_EXPORT_TLS_ON / OFF          # skeleton (belum enkripsi)
+TCP_CLIENT_START <host> <port>
+TCP_CLIENT_STOP
+```
+
+#### Contoh Server Referensi
+
+File: `server_example/TelemetryServer.cpp`
+
+Build cepat (Developer Command Prompt VS / x64 Native Tools):
+
+```powershell
+cl /EHsc server_example\TelemetryServer.cpp /Fe:TelemetryServer.exe ws2_32.lib
+```
+
+Jalankan:
+
+```powershell
+TelemetryServer.exe 0.0.0.0 9000 SECRET_KEY_123
+```
+
+Server (versi baru) akan log: `sid=<sid> seq=<n> hmac=OK alg=hmac256 order=OK drops=0 raw=<frame>`.
+
+Deteksi server:
+
+- `hmac=FAIL` → potensi manipulasi / key mismatch / replay modifikasi.
+- `order=OUT` → out-of-order atau replay (cek `drops` counter per sid).
+- Gap besar seq → kehilangan frame (network loss) atau filtering.
+
+Rekomendasi manajemen key:
+
+- Set key awal via pipeline command setelah koneksi aman.
+- Aktifkan rotasi interval (misal 300000 ms = 5 menit) bila overhead koordinasi server siap.
+- Sinkronisasi key ke server: gunakan channel terpisah (pipe) atau protokol TLS dengan rekey handshake (belum diimplement di sample).
+
+#### TLS Skeleton
+
+Saat ini hanya ada abstraksi transport (`ITelemetryTransport`) + implementasi `PlainTelemetryTransport`. Command `INTEGRITY_EXPORT_TLS_ON` hanya men-set flag (belum mengganti transport). Langkah lanjutan:
+
+1. Tambah kelas `TlsTelemetryTransport` (Schannel) dengan state credential + context.
+2. Ganti pointer transport di `TcpClient` saat `UseTls(true)` sebelum koneksi.
+3. Validasi sertifikat: pin public key hash SHA-256 atau CA internal.
+4. (Opsional) mutual TLS: server validasi client cert untuk anti impersonation.
+5. Rekey periodik / session ticket reuse (optimisasi handshake).
+
+
+
+
 - Korelasi multi-log (server console, collector eksternal) ke satu sesi koneksi.
 - Investigasi insiden (misal banyak `HMAC_FAIL` → tahu sesi mana tanpa perlu hashing ulang nonce).
 
-Contoh Event Setelah Handshake:
-
-```json
-{"evt":"HANDSHAKE_OK","tick":1234567,"sessionId":"9f2c4c0a5c2b4d19e8ab77b4d2aa1130","hmacRequired":"1"}
-```
-
-Contoh STATE Dump:
-
-```json
-{"evt":"STATE","tick":1236000,"sessionId":"9f2c4c0a5c2b4d19e8ab77b4d2aa1130","hmacRequired":"1","seqEnforce":"1","hasSeqBaseline":"1","lastSeq":"42","replayCache":"5","c_HANDSHAKE_OK":"1","c_STATE_DUMP":"1"}
-```
+Catatan: event handshake / state JSON belum diimplement karena plaintext; akan relevan setelah TLS & kontrol reliabilitas ditambah.
 
 Integrasi Klien:
 

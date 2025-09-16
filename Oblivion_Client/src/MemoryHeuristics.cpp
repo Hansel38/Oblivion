@@ -16,9 +16,18 @@ double MemoryHeuristics::Entropy(const unsigned char* data, size_t len){ if(len=
 bool MemoryHeuristics::Scan(){
     HANDLE proc = GetCurrentProcess(); SYSTEM_INFO si; GetSystemInfo(&si); unsigned char* addr = (unsigned char*)si.lpMinimumApplicationAddress; const unsigned char* maxAddr = (const unsigned char*)si.lpMaximumApplicationAddress; bool detected=false;
     size_t rwxCount=0; std::wstring detail;
-    while(addr < maxAddr){ MEMORY_BASIC_INFORMATION mbi; if(!VirtualQuery(addr,&mbi,sizeof(mbi))) break; size_t regionSize = mbi.RegionSize; if(mbi.State==MEM_COMMIT){ DWORD prot = mbi.Protect; bool exec = (prot & PAGE_EXECUTE) || (prot & PAGE_EXECUTE_READ) || (prot & PAGE_EXECUTE_READWRITE) || (prot & PAGE_EXECUTE_WRITECOPY); bool write = (prot & PAGE_READWRITE) || (prot & PAGE_EXECUTE_READWRITE) || (prot & PAGE_WRITECOPY) || (prot & PAGE_EXECUTE_WRITECOPY); if(exec && write){ rwxCount++; if(rwxCount<=8){ wchar_t buf[32]; swprintf_s(buf,L"0x%p", addr); detail+=L"[rwx="+std::wstring(buf)+L"]"; } }
-            if(exec && (prot & PAGE_READWRITE)){
-                size_t sample = regionSize; if(sample>4096) sample=4096; __try { double H = Entropy((unsigned char*)addr, sample); if(H > 7.3){ wchar_t buf[32]; swprintf_s(buf,L"0x%p", addr); detail+=L"[entropy="+std::wstring(buf)+L":"+std::to_wstring((int)(H*100))+L"]"; detected=true; } } __except(EXCEPTION_EXECUTE_HANDLER) {}
+    while(addr < maxAddr){
+        MEMORY_BASIC_INFORMATION mbi; if(!VirtualQuery(addr,&mbi,sizeof(mbi))) break; size_t regionSize = mbi.RegionSize; 
+        if(mbi.State==MEM_COMMIT){
+            DWORD prot = mbi.Protect; bool guarded = (prot & PAGE_GUARD)!=0; 
+            bool exec = (prot & PAGE_EXECUTE) || (prot & PAGE_EXECUTE_READ) || (prot & PAGE_EXECUTE_READWRITE) || (prot & PAGE_EXECUTE_WRITECOPY);
+            bool write = (prot & PAGE_READWRITE) || (prot & PAGE_EXECUTE_READWRITE) || (prot & PAGE_WRITECOPY) || (prot & PAGE_EXECUTE_WRITECOPY);
+            if(exec && write){ rwxCount++; if(rwxCount<=8){ wchar_t buf[32]; swprintf_s(buf,L"0x%p", addr); detail+=L"[rwx="+std::wstring(buf)+L"]"; } }
+            if(exec && (prot & PAGE_READWRITE) && !guarded){
+                size_t sample = regionSize; if(sample>4096) sample=4096; 
+                // Akses langsung tanpa SEH; region COMMIT & bukan guard → relatif aman
+                double H = Entropy((unsigned char*)addr, sample);
+                if(H > 7.3){ wchar_t buf[32]; swprintf_s(buf,L"0x%p", addr); detail+=L"[entropy="+std::wstring(buf)+L":"+std::to_wstring((int)(H*100))+L"]"; detected=true; }
             }
         }
         addr += regionSize;

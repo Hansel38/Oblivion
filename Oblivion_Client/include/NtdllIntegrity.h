@@ -12,17 +12,23 @@ namespace OblivionEye {
         void Tick() override; // perform integrity check
         void Start(unsigned intervalMs = 60000) { (void)intervalMs; }
         void Stop() {}
+        // Wrapper publik (aman) untuk operasi maintenance yang sebelumnya private
+        bool RequestForceRebaseline() { return ForceRebaseline(); }
+        bool RequestVerifyNow() { return VerifyNow(); }
     private:
         NtdllIntegrity() = default;
         bool Check();
         void CaptureBaseline();
+        bool ForceRebaseline(); // manual rebaseline with telemetry
+        bool VerifyNow();       // on-demand verify without termination
         bool CaptureSubsectionHashes();
         void SaveBaseline();
         bool LoadBaseline();
         void ComputeHmac();
         bool VerifyHmac() const;
         bool MapFreshDiskText(std::vector<unsigned long long>& diskChunks, unsigned long long& diskHash) const; // compare with clean file copy
-    // Hash/HMAC now centralized in HashUtil
+    // HMAC helper (uses centralized HashUtil SHA-256)
+    void HmacSha256(const unsigned char* key, size_t keyLen, const unsigned char* data, size_t dataLen, unsigned char out[32]) const;
         void BuildKey(std::vector<unsigned char>& key) const; // obfuscated key builder
         std::vector<unsigned char> BuildHmacData() const;
         std::wstring HmacToHex() const;

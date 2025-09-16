@@ -152,18 +152,26 @@
     <ClInclude Include="include\EATHookChecker.h" />
     <ClInclude Include="include\EmbeddedPolicy.h" />
     <ClInclude Include="include\EventReporter.h" />
+    <ClInclude Include="include\ExportHmacKey.h" />
     <ClInclude Include="include\FileIntegrity.h" />
     <ClInclude Include="include\Gdi32Integrity.h" />
     <ClInclude Include="include\HandleProtection.h" />
+    <ClInclude Include="include\HashUtil.h" />
     <ClInclude Include="include\Heartbeat.h" />
     <ClInclude Include="include\HijackedThreadDetector.h" />
     <ClInclude Include="include\HWID.h" />
     <ClInclude Include="include\IATHookChecker.h" />
     <ClInclude Include="include\IDetector.h" />
     <ClInclude Include="include\IntegrityChunkWhitelist.h" />
+    <ClInclude Include="include\IntegrityExport.h" />
+    <ClInclude Include="include\IntegrityHmacUtil.h" />
+    <ClInclude Include="include\IntegrityTelemetry.h" />
     <ClInclude Include="include\Kernel32Integrity.h" />
+    <ClInclude Include="include\KernelSurfaceStub.h" />
     <ClInclude Include="include\Logger.h" />
+    <ClInclude Include="include\MemoryHeuristics.h" />
     <ClInclude Include="include\ModuleBlacklist.h" />
+    <ClInclude Include="include\ModuleSectionIntegrity.h" />
     <ClInclude Include="include\NtdllIntegrity.h" />
     <ClInclude Include="include\OverlayBlacklist.h" />
     <ClInclude Include="include\OverlayScanner.h" />
@@ -174,8 +182,8 @@
     <ClInclude Include="include\PrologHookChecker.h" />
     <ClInclude Include="include\PublisherWhitelist.h" />
     <ClInclude Include="include\RuntimeStats.h" />
-  <ClInclude Include="include\HashUtil.h" />
-  <ClInclude Include="include\SharedKey.h" />
+    <ClInclude Include="include\SelfCheck.h" />
+    <ClInclude Include="include\SharedKey.h" />
     <ClInclude Include="include\Signatures.h" />
     <ClInclude Include="include\SignatureScanner.h" />
     <ClInclude Include="include\SignatureTrust.h" />
@@ -195,7 +203,14 @@
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">Create</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Create</PrecompiledHeader>
     </ClCompile>
-    <ClCompile Include="src\SelfCheck.cpp" />
+    <ClCompile Include="src\ExportHmacKey.cpp" />
+    <ClCompile Include="src\HashUtil.cpp" />
+    <ClCompile Include="src\IntegrityExport.cpp" />
+    <ClCompile Include="src\IntegrityHmacUtil.cpp" />
+    <ClCompile Include="src\IntegrityTelemetry.cpp" />
+    <ClCompile Include="src\KernelSurfaceStub.cpp" />
+    <ClCompile Include="src\MemoryHeuristics.cpp" />
+    <ClCompile Include="src\ModuleSectionIntegrity.cpp" />
     <ClCompile Include="src\AntiDebug.cpp" />
     <ClCompile Include="src\AntiInjection.cpp" />
     <ClCompile Include="src\AntiSuspend.cpp" />
@@ -230,8 +245,8 @@
     <ClCompile Include="src\PrologHookChecker.cpp" />
     <ClCompile Include="src\PublisherWhitelist.cpp" />
     <ClCompile Include="src\RuntimeStats.cpp" />
-  <ClCompile Include="src\HashUtil.cpp" />
-  <ClCompile Include="src\SharedKey.cpp" />
+    <ClCompile Include="src\SelfCheck.cpp" />
+    <ClCompile Include="src\SharedKey.cpp" />
     <ClCompile Include="src\Signatures.cpp" />
     <ClCompile Include="src\SignatureScanner.cpp" />
     <ClCompile Include="src\SignatureTrust.cpp" />

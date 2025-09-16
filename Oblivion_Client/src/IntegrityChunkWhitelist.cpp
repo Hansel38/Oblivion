@@ -28,5 +28,6 @@ namespace IntegrityChunkWhitelist {
     void Clear(){ std::lock_guard<std::mutex> lk(g_mtx); g_entries.clear(); }
 
     std::vector<std::pair<std::wstring,size_t>> GetAll(){ std::lock_guard<std::mutex> lk(g_mtx); std::vector<std::pair<std::wstring,size_t>> out; for(auto &e: g_entries){ for(auto &iv: e.intervals){ for(size_t i=iv.a;i<=iv.b && i-iv.a<1024;++i) out.push_back({e.mod,i}); } } return out; }
+    size_t CountFor(const std::wstring& moduleNameLower){ std::lock_guard<std::mutex> lk(g_mtx); auto low=ToLower(moduleNameLower); for(auto &e: g_entries) if(e.mod==low){ size_t total=0; for(auto &iv: e.intervals){ total += (iv.b>=iv.a)? (iv.b-iv.a+1):0; } return total; } return 0; }
 }
 }

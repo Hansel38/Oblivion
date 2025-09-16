@@ -25,6 +25,14 @@
 #include "../include/Signatures.h"
 #include "../include/SharedKey.h"
 #include "../include/HashUtil.h"
+#include "../include/IntegrityTelemetry.h"
+#include "../include/NtdllIntegrity.h"
+#include "../include/Kernel32Integrity.h"
+#include "../include/User32Integrity.h"
+#include "../include/Gdi32Integrity.h"
+#include "../include/IntegrityExport.h"
+#include "../include/ExportHmacKey.h"
+#include "../include/TcpClient.h"
 #include <bcrypt.h>
 #pragma comment(lib, "bcrypt.lib")
 
@@ -127,6 +135,70 @@ namespace OblivionEye {
     else if (cmd == "CORR_STATUS") { auto w = DetectionCorrelator::Instance().GetStatus(); SendUtf8(L"CORR_STATUS", w); }
     else if (cmd == "CORR_STATUS_JSON") { auto j = DetectionCorrelator::Instance().GetStatusJson(); SendUtf8(L"CORR_STATUS_JSON", std::wstring(j.begin(), j.end())); }
     else if (cmd == "CORR_RESET") { DetectionCorrelator::Instance().Reset(); SendUtf8(L"CORR_RESET", L"OK"); }
+    else if (cmd == "INTEGRITY_STATUS" || cmd == "INTEGRITY_STATUS_JSON") {
+        // Collect telemetry for known modules
+        std::wstring modules[4] = {L"ntdll.dll", L"kernel32.dll", L"user32.dll", L"gdi32.dll"};
+        bool json = (cmd == "INTEGRITY_STATUS_JSON");
+        if(json){
+            std::wstringstream js; js<<L"{"; bool first=true; for(auto &m: modules){ auto st=IntegrityTelemetry::Instance().Get(m); if(!first) js<<L","; first=false; js<<L"\""<<m<<L"\":{";
+                js<<L"\"baselineLoadsOk\":"<<st.baselineLoadsOk
+                  <<L",\"hmacMismatch\":"<<st.hmacMismatch
+                  <<L",\"rebaselineCount\":"<<st.rebaselineCount
+                  <<L",\"manualRebaselineCount\":"<<st.manualRebaselineCount
+                  <<L",\"chainAdvanceCount\":"<<st.chainAdvanceCount
+                  <<L",\"autoWhitelistCount\":"<<st.autoWhitelistCount
+                  <<L",\"verifyNowRequests\":"<<st.verifyNowRequests
+                  <<L",\"forceVerifyFailures\":"<<st.forceVerifyFailures
+                  <<L",\"totalChunks\":"<<st.totalChunks
+                  <<L",\"whitelistedChunks\":"<<st.whitelistedChunks
+                  <<L",\"hmacValid\":"<<(st.hmacValid?1:0)
+                  <<L",\"chainDepth\":"<<st.chainDepth
+                  <<L",\"lastBaselineTime\":\""<<(st.lastBaselineTime.empty()?L"":st.lastBaselineTime)<<L"\""
+                  <<L",\"lastAutoWhitelistTime\":\""<<(st.lastAutoWhitelistTime.empty()?L"":st.lastAutoWhitelistTime)<<L"\""
+                  <<L",\"lastManualRebaselineTime\":\""<<(st.lastManualRebaselineTime.empty()?L"":st.lastManualRebaselineTime)<<L"\"";
+                js<<L"}"; }
+            js<<L"}"; SendUtf8(L"INTEGRITY_STATUS_JSON", js.str());
+        } else {
+            std::wstringstream ss; bool first=true; for(auto &m: modules){ auto st=IntegrityTelemetry::Instance().Get(m); if(!first) ss<<L" | "; first=false; ss<<m<<L" bl="<<st.baselineLoadsOk<<L" hm="<<st.hmacMismatch<<L" rb="<<st.rebaselineCount<<L" (man="<<st.manualRebaselineCount<<L") aw="<<st.autoWhitelistCount<<L" vfy="<<st.verifyNowRequests<<L" vfFail="<<st.forceVerifyFailures<<L" wl="<<st.whitelistedChunks<<L"/"<<st.totalChunks<<L" hmac="<<(st.hmacValid?L"OK":L"BAD")<<L" chain="<<st.chainDepth; }
+            SendUtf8(L"INTEGRITY_STATUS", ss.str());
+        }
+    }
+    else if (cmd == "INTEGRITY_REBASELINE") {
+        std::string mod; iss>>mod; auto doOne=[&](const std::wstring &mw){ bool ok=false; if(mw==L"ntdll.dll") ok=NtdllIntegrity::Instance().RequestForceRebaseline(); else if(mw==L"kernel32.dll") ok=Kernel32Integrity::Instance().RequestForceRebaseline(); else if(mw==L"user32.dll") ok=User32Integrity::Instance().RequestForceRebaseline(); else if(mw==L"gdi32.dll") ok=Gdi32Integrity::Instance().RequestForceRebaseline(); SendUtf8(L"RESULT", (mw+L" REBASELINE "+(ok?L"OK":L"FAIL"))); };
+        if(mod.empty() || mod=="ALL") { doOne(L"ntdll.dll"); doOne(L"kernel32.dll"); doOne(L"user32.dll"); doOne(L"gdi32.dll"); }
+        else { std::wstring wm = Utf8ToWide(mod); if(wm.find(L'.')==std::wstring::npos) wm += L".dll"; doOne(wm); }
+    }
+    else if (cmd == "INTEGRITY_VERIFY") {
+        std::string mod; iss>>mod; auto doOne=[&](const std::wstring &mw){ bool ok=false; if(mw==L"ntdll.dll") ok=NtdllIntegrity::Instance().RequestVerifyNow(); else if(mw==L"kernel32.dll") ok=Kernel32Integrity::Instance().RequestVerifyNow(); else if(mw==L"user32.dll") ok=User32Integrity::Instance().RequestVerifyNow(); else if(mw==L"gdi32.dll") ok=Gdi32Integrity::Instance().RequestVerifyNow(); SendUtf8(L"RESULT", (mw+L" VERIFY "+(ok?L"OK":L"FAIL"))); };
+        if(mod.empty() || mod=="ALL") { doOne(L"ntdll.dll"); doOne(L"kernel32.dll"); doOne(L"user32.dll"); doOne(L"gdi32.dll"); }
+        else { std::wstring wm = Utf8ToWide(mod); if(wm.find(L'.')==std::wstring::npos) wm += L".dll"; doOne(wm); }
+    }
+    else if (cmd == "INTEGRITY_EXPORT_ON") { IntegrityExport::Instance().SetEnabled(true); SendUtf8(L"RESULT", L"INTEGRITY_EXPORT_ON OK"); }
+    else if (cmd == "INTEGRITY_EXPORT_OFF") { IntegrityExport::Instance().SetEnabled(false); SendUtf8(L"RESULT", L"INTEGRITY_EXPORT_OFF OK"); }
+    else if (cmd == "INTEGRITY_EXPORT_INTERVAL") { unsigned ms=0; iss>>ms; if(ms>0){ IntegrityExport::Instance().SetIntervalMs(ms); SendUtf8(L"RESULT", L"INTEGRITY_EXPORT_INTERVAL OK "+std::to_wstring(ms)); } else SendUtf8(L"RESULT", L"INTEGRITY_EXPORT_INTERVAL FAIL"); }
+    else if (cmd == "INTEGRITY_EXPORT_NOW") { IntegrityExport::Instance().SendNow(); SendUtf8(L"RESULT", L"INTEGRITY_EXPORT_NOW OK"); }
+    else if (cmd == "TCP_CLIENT_START") { std::string host; unsigned short port=0; iss>>host>>port; if(!host.empty() && port>0){ TcpClient::Instance().Start(Utf8ToWide(host), port); SendUtf8(L"RESULT", L"TCP_CLIENT_START OK"); } else SendUtf8(L"RESULT", L"TCP_CLIENT_START FAIL"); }
+    else if (cmd == "TCP_CLIENT_STOP") { TcpClient::Instance().Stop(); SendUtf8(L"RESULT", L"TCP_CLIENT_STOP OK"); }
+    else if (cmd == "INTEGRITY_EXPORT_STATUS") {
+        auto &ie = IntegrityExport::Instance();
+        auto s = ie.IsEnabled()?L"ENABLED":L"DISABLED";
+        // Kita tidak expose sessionId penuh sebagai command (bisa dianggap semi-sensitif), tapi boleh untuk debugging.
+        auto rotIv = ExportHmacKey::Instance().GetRotationIntervalMs();
+        auto lastRot = ExportHmacKey::Instance().GetLastRotationTime();
+        std::wstring w = std::wstring(L"INTEGRITY_EXPORT_STATUS ")+s+L" interval="+std::to_wstring(ie.IntervalMs())+
+            L" hmac="+(ie.IsHmacEnabled()?L"ON":L"OFF")+L" require="+(ie.IsHmacRequire()?L"ON":L"OFF")+
+            L" rotIvMs="+std::to_wstring(rotIv)+L" lastRot="+(lastRot.empty()?L"-":lastRot);
+        SendUtf8(L"RESULT", w);
+    }
+    else if (cmd == "INTEGRITY_EXPORT_SET_KEY") { std::string rest; getline(iss,rest); if(!rest.empty() && rest[0]==' ') rest.erase(0,1); if(!rest.empty()){ ExportHmacKey::Instance().SetFromUtf8(rest); SendUtf8(L"RESULT", L"INTEGRITY_EXPORT_SET_KEY OK"); } else SendUtf8(L"RESULT", L"INTEGRITY_EXPORT_SET_KEY FAIL"); }
+    else if (cmd == "INTEGRITY_EXPORT_HMAC_ON") { IntegrityExport::Instance().SetHmacEnabled(true); SendUtf8(L"RESULT", L"INTEGRITY_EXPORT_HMAC_ON OK"); }
+    else if (cmd == "INTEGRITY_EXPORT_HMAC_OFF") { IntegrityExport::Instance().SetHmacEnabled(false); SendUtf8(L"RESULT", L"INTEGRITY_EXPORT_HMAC_OFF OK"); }
+    else if (cmd == "INTEGRITY_EXPORT_HMAC_REQUIRE_ON") { IntegrityExport::Instance().SetHmacRequire(true); SendUtf8(L"RESULT", L"INTEGRITY_EXPORT_HMAC_REQUIRE_ON OK"); }
+    else if (cmd == "INTEGRITY_EXPORT_HMAC_REQUIRE_OFF") { IntegrityExport::Instance().SetHmacRequire(false); SendUtf8(L"RESULT", L"INTEGRITY_EXPORT_HMAC_REQUIRE_OFF OK"); }
+    else if (cmd == "INTEGRITY_EXPORT_TLS_ON") { TcpClient::Instance().UseTls(true); SendUtf8(L"RESULT", L"INTEGRITY_EXPORT_TLS_ON PENDING (skeleton)"); }
+    else if (cmd == "INTEGRITY_EXPORT_TLS_OFF") { TcpClient::Instance().UseTls(false); SendUtf8(L"RESULT", L"INTEGRITY_EXPORT_TLS_OFF OK"); }
+    else if (cmd == "INTEGRITY_EXPORT_ROTATE_KEY") { bool ok = ExportHmacKey::Instance().RotateRandom(); SendUtf8(L"RESULT", ok?L"INTEGRITY_EXPORT_ROTATE_KEY OK":L"INTEGRITY_EXPORT_ROTATE_KEY FAIL"); }
+    else if (cmd == "INTEGRITY_EXPORT_ROTATE_INTERVAL") { unsigned ms=0; iss>>ms; if(ms>=1000){ ExportHmacKey::Instance().SetRotationIntervalMs(ms); SendUtf8(L"RESULT", L"INTEGRITY_EXPORT_ROTATE_INTERVAL OK"); } else SendUtf8(L"RESULT", L"INTEGRITY_EXPORT_ROTATE_INTERVAL FAIL"); }
     else if (cmd == "DUMP_CONFIG") {
         std::wstringstream ss;
         ss << L"CMD_WINDOW_MS=" << Config::CMD_WINDOW_MS

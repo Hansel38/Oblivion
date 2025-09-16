@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <sstream>
 
+
 ModuleSectionIntegrity &ModuleSectionIntegrity::Instance(){ static ModuleSectionIntegrity s; return s; }
 
 unsigned long ModuleSectionIntegrity::HashBytes(const unsigned char *data, size_t len) const {
@@ -40,10 +41,10 @@ void ModuleSectionIntegrity::CaptureForModule(ModuleInfo &mod, HMODULE hMod) {
     }
     mod.baselineCaptured = true;
     std::wstringstream ws; ws << L"ModuleSectionIntegrity baseline captured for "<< mod.name << L" sections="<< mod.baseline.size();
-    Log(ws.str());
+    OblivionEye::Log(ws.str());
     // Emit structured event baseline summary
     std::wstringstream ev; ev<<L"mod="<<mod.name<<L" sections="<<mod.baseline.size();
-    EventReporter::SendDetection(L"ModuleSectionIntegrity", L"BASELINE " + ev.str());
+    OblivionEye::EventReporter::SendDetection(L"ModuleSectionIntegrity", L"BASELINE " + ev.str());
 }
 
 void ModuleSectionIntegrity::CheckModule(ModuleInfo &mod, HMODULE hMod) {
@@ -68,8 +69,8 @@ void ModuleSectionIntegrity::CheckModule(ModuleInfo &mod, HMODULE hMod) {
     }
     if(mismatch && !mod.mismatchReported){
         mod.mismatchReported = true;
-        EventReporter::SendDetection(L"ModuleSectionIntegrity", L"MISMATCH mod="+mod.name+L" deltas="+deltas);
-        ShowDetectionAndExit(L"Module section integrity mismatch " + mod.name + L" " + deltas);
+    OblivionEye::EventReporter::SendDetection(L"ModuleSectionIntegrity", L"MISMATCH mod="+mod.name+L" deltas="+deltas);
+    OblivionEye::Log(L"Module section integrity mismatch " + mod.name + L" " + deltas); // Replaced ShowDetectionAndExit (not available) with logging
     }
 }
 

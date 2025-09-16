@@ -6,6 +6,20 @@
 #include "../include/Utils.h"
 #include <windows.h>
 #include <psapi.h>
+#include <winternl.h> // untuk akses struktur PEB; jika tidak tersedia definisikan minimal fallback di bawah
+
+#ifndef _WINTERNL_ // fallback minimal jika winternl tidak menyediakan definisi (hindari gagal kompilasi PPEB)
+typedef struct _PEB_LDR_DATA *PPEB_LDR_DATA;
+typedef struct _RTL_USER_PROCESS_PARAMETERS *PRTL_USER_PROCESS_PARAMETERS;
+typedef struct _PEB {
+    BYTE Reserved1[2];
+    BYTE BeingDebugged;
+    BYTE Reserved2[1];
+    PVOID Reserved3[2];
+    PPEB_LDR_DATA Ldr;
+    PRTL_USER_PROCESS_PARAMETERS ProcessParameters;
+} PEB, *PPEB;
+#endif
 
 namespace OblivionEye {
 namespace {

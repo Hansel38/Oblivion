@@ -117,4 +117,12 @@ constexpr bool     MODSEC_AUDIT_MODE_DEFAULT           = false;  // When true de
 constexpr unsigned INTEGRITY_BASELINE_VERSION          = 2;      // Versioned baseline format (upgrade path aware)
 constexpr bool     INTEGRITY_AUTO_WHITELIST_DISK_MATCH_DEFAULT = false; // If true, chunks that differ from old baseline but equal clean disk are auto-whitelisted & baseline refreshed.
 
+// Integrity telemetry export (central server push)
+constexpr bool     INTEGRITY_EXPORT_ENABLED_DEFAULT = false;   // Disabled by default (opt-in via command)
+constexpr unsigned INTEGRITY_EXPORT_INTERVAL_MS_DEFAULT = 15000; // 15s push interval
+constexpr size_t   INTEGRITY_EXPORT_MAX_JSON = 2048;           // Safety cap for snapshot payload size
+constexpr bool     INTEGRITY_EXPORT_HMAC_ENABLED_DEFAULT = false; // If true, append |X=<hmacSha256> over UTF-8 payload after INTSTAT| prefix (excluding |X= segment)
+constexpr bool     INTEGRITY_EXPORT_HMAC_REQUIRE_DEFAULT = false; // If true, receiver should reject frames tanpa |X=
+constexpr bool     INTEGRITY_EXPORT_TLS_ENABLED_DEFAULT  = false; // Placeholder flag; TLS not implemented (stub for future)
+
 }

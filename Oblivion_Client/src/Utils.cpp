@@ -2,6 +2,7 @@
 #include "../include/Utils.h"
 #include "../include/Logger.h"
 #include "../include/EventReporter.h"
+#include "../include/Config.h" // diperlukan untuk OblivionEye::Config::MODSEC_AUDIT_MODE_DEFAULT
 #include <windows.h>
 #include <tlhelp32.h>
 #include <psapi.h>
