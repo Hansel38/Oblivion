@@ -1411,3 +1411,4 @@ Rencana lanjutan CI:
 - Artifact upload (log file, policy baseline)
 - Static analysis (clang-tidy / CodeQL)
 - Caching build (incremental) untuk percepatan.
+kontak ku : https://rathena.org/board/profile/24595-monyet/
